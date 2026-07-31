@@ -13,27 +13,34 @@ export function getAuthToken() {
 }
 
 /**
- * Dynamically determine the backend server IP address.
+ * Dynamically determine the backend server URL.
+ * Production: Vercel deployed backend
+ * Development: Auto-detect LAN IP from Expo dev server
  */
+const PRODUCTION_API_URL = 'https://dcp-quizzy-62ya-murex.vercel.app/api';
+
 export function getBackendBaseUrl() {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
-  
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-      return `http://${ip}:5000/api`;
+  // In dev mode (Expo Go), use local LAN server for faster debugging
+  if (__DEV__) {
+    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
+    if (hostUri) {
+      const ip = hostUri.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+        return `http://${ip}:5000/api`;
+      }
     }
+    if (Platform.OS === 'android') {
+      return 'http://192.168.100.14:5000/api';
+    }
+    return 'http://localhost:5000/api';
   }
 
-  if (Platform.OS === 'android') {
-    return 'http://192.168.100.14:5000/api';
-  }
-
-  return 'http://localhost:5000/api';
+  // Production builds use the deployed Vercel backend
+  return PRODUCTION_API_URL;
 }
 
 export const API_BASE_URL = getBackendBaseUrl();

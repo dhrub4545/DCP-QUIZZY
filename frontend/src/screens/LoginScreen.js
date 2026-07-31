@@ -11,16 +11,20 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Mail, Lock, User, ArrowRight, Sparkles, CheckCircle2 } from 'lucide-react-native';
+import { Mail, Lock, User, ArrowRight, CheckCircle2, Eye, EyeOff } from 'lucide-react-native';
 import { loginApi, registerApi } from '../services/api';
+
+const { width } = Dimensions.get('window');
 
 export default function LoginScreen({ navigation }) {
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -79,60 +83,48 @@ export default function LoginScreen({ navigation }) {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {/* Logo & Brand Title Header */}
-          <View style={styles.brandContainer}>
-            <View style={styles.logoWrapper}>
-              <Image
-                source={require('../../assets/logo2.png')}
-                style={styles.logoImage}
-                resizeMode="contain"
-              />
-            </View>
-
-            <View style={styles.appNameRow}>
-              <Text style={styles.appName}>QUIZZY</Text>
-              <View style={styles.proBadge}>
-                <Sparkles size={11} color="#a855f7" />
-                <Text style={styles.proBadgeText}>PRO</Text>
-              </View>
-            </View>
-
+          {/* ── Top: Logo & Brand ── */}
+          <View style={styles.heroSection}>
+            <Image
+              source={require('../../assets/logo2.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
             <Text style={styles.tagline}>Smart MCQ Practice & AI Medical Tutor</Text>
           </View>
 
-          {/* Login / Register Toggle Tabs */}
-          <View style={styles.tabContainer}>
-            <TouchableOpacity
-              style={[styles.tabBtn, !isRegister && styles.activeTabBtn]}
-              onPress={() => setIsRegister(false)}
-            >
-              <Text style={[styles.tabBtnText, !isRegister && styles.activeTabBtnText]}>
-                Sign In
-              </Text>
-            </TouchableOpacity>
+          {/* ── Bottom: Auth Card ── */}
+          <View style={styles.authCard}>
+            {/* Toggle Tabs */}
+            <View style={styles.tabRow}>
+              <TouchableOpacity
+                style={[styles.tab, !isRegister && styles.tabActive]}
+                onPress={() => setIsRegister(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, !isRegister && styles.tabTextActive]}>Sign In</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tab, isRegister && styles.tabActive]}
+                onPress={() => setIsRegister(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.tabText, isRegister && styles.tabTextActive]}>Register</Text>
+              </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              style={[styles.tabBtn, isRegister && styles.activeTabBtn]}
-              onPress={() => setIsRegister(true)}
-            >
-              <Text style={[styles.tabBtnText, isRegister && styles.activeTabBtnText]}>
-                Register
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Form Fields */}
-          <View style={styles.formCard}>
+            {/* Form Fields */}
             {isRegister && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Full Name</Text>
-                <View style={styles.inputWrapper}>
-                  <User size={18} color="#64748b" style={styles.inputIcon} />
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>Full Name</Text>
+                <View style={styles.fieldRow}>
+                  <User size={16} color="#64748b" />
                   <TextInput
-                    style={styles.input}
+                    style={styles.fieldInput}
                     placeholder="Enter your full name"
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor="#475569"
                     value={name}
                     onChangeText={setName}
                   />
@@ -140,14 +132,14 @@ export default function LoginScreen({ navigation }) {
               </View>
             )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
-              <View style={styles.inputWrapper}>
-                <Mail size={18} color="#64748b" style={styles.inputIcon} />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Email Address</Text>
+              <View style={styles.fieldRow}>
+                <Mail size={16} color="#64748b" />
                 <TextInput
-                  style={styles.input}
+                  style={styles.fieldInput}
                   placeholder="name@example.com"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor="#475569"
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
@@ -156,54 +148,67 @@ export default function LoginScreen({ navigation }) {
               </View>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <View style={styles.inputWrapper}>
-                <Lock size={18} color="#64748b" style={styles.inputIcon} />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Password</Text>
+              <View style={styles.fieldRow}>
+                <Lock size={16} color="#64748b" />
                 <TextInput
-                  style={styles.input}
+                  style={styles.fieldInput}
                   placeholder="Enter your password"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor="#475569"
                   value={password}
                   onChangeText={setPassword}
-                  secureTextEntry
+                  secureTextEntry={!showPassword}
                 />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
+                  {showPassword
+                    ? <EyeOff size={16} color="#94a3b8" />
+                    : <Eye size={16} color="#94a3b8" />
+                  }
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Submit Button */}
+            {/* Submit */}
             <TouchableOpacity
-              style={[styles.submitBtn, loading && { opacity: 0.7 }]}
+              style={[styles.primaryBtn, loading && { opacity: 0.65 }]}
               onPress={handleSubmit}
               disabled={loading}
               activeOpacity={0.8}
             >
               {loading ? (
-                <ActivityIndicator size="small" color="#ffffff" />
+                <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <View style={styles.submitBtnContent}>
-                  <Text style={styles.submitBtnText}>
-                    {isRegister ? 'Create QUIZZY Account' : 'Sign In to QUIZZY'}
+                <View style={styles.primaryBtnRow}>
+                  <Text style={styles.primaryBtnText}>
+                    {isRegister ? 'Create Account' : 'Sign In'}
                   </Text>
-                  <ArrowRight size={18} color="#ffffff" style={{ marginLeft: 6 }} />
+                  <ArrowRight size={17} color="#fff" style={{ marginLeft: 5 }} />
                 </View>
               )}
             </TouchableOpacity>
 
-            {/* Guest Quick Entry */}
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Guest */}
             <TouchableOpacity
               style={styles.guestBtn}
               onPress={handleGuestLogin}
               activeOpacity={0.7}
             >
-              <CheckCircle2 size={16} color="#818cf8" />
-              <Text style={styles.guestBtnText}>Continue as Guest / Instant Entry</Text>
+              <CheckCircle2 size={15} color="#818cf8" />
+              <Text style={styles.guestBtnText}>Continue as Guest</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Footer Info */}
+          {/* Footer */}
           <Text style={styles.footerText}>
-            QUIZZY • Powered by Gemini 3.6 Flash AI Engine
+            Powered by Gemini 3.6 Flash AI Engine
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -217,178 +222,157 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 30,
-    paddingBottom: 40,
-    alignItems: 'center',
+    flexGrow: 1,
+    paddingHorizontal: 22,
+    justifyContent: 'center',
+    paddingVertical: 20,
   },
 
-  // Brand Header
-  brandContainer: {
+  /* ── Hero / Logo ── */
+  heroSection: {
     alignItems: 'center',
     marginBottom: 28,
   },
-  logoWrapper: {
-    width: 90,
-    height: 90,
-    borderRadius: 24,
-    backgroundColor: '#1e293b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#6366f1',
-    shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 8,
-    marginBottom: 14,
-  },
   logoImage: {
-    width: 68,
-    height: 68,
-  },
-  appNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  appName: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#f8fafc',
-    letterSpacing: 2,
-  },
-  proBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    marginLeft: 8,
-    borderWidth: 1,
-    borderColor: '#a855f7',
-  },
-  proBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#c084fc',
-    marginLeft: 3,
+    width: width * 0.38,
+    height: width * 0.38,
+    marginBottom: 10,
   },
   tagline: {
     fontSize: 13,
     color: '#94a3b8',
-    marginTop: 4,
+    letterSpacing: 0.2,
   },
 
-  // Toggle Tabs
-  tabContainer: {
-    flexDirection: 'row',
+  /* ── Auth Card ── */
+  authCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 4,
-    width: '100%',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  activeTabBtn: {
-    backgroundColor: '#6366f1',
-  },
-  tabBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94a3b8',
-  },
-  activeTabBtnText: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
-
-  // Form Card
-  formCard: {
-    width: '100%',
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
     borderColor: '#334155',
-    elevation: 4,
   },
-  inputGroup: {
+
+  /* Tabs */
+  tabRow: {
+    flexDirection: 'row',
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 18,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  tabActive: {
+    backgroundColor: '#6366f1',
+  },
+  tabText: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  tabTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+
+  /* Fields */
+  fieldBlock: {
     marginBottom: 14,
   },
-  inputLabel: {
-    fontSize: 12.5,
-    fontWeight: '700',
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
     color: '#cbd5e1',
-    marginBottom: 6,
+    marginBottom: 5,
+    marginLeft: 2,
   },
-  inputWrapper: {
+  fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#0f172a',
-    borderRadius: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: '#334155',
-    paddingHorizontal: 12,
+    gap: 8,
   },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
+  fieldInput: {
     flex: 1,
-    paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 13.5,
     color: '#f8fafc',
+    padding: 0,
   },
-  submitBtn: {
+
+  /* Primary Button */
+  primaryBtn: {
     backgroundColor: '#6366f1',
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingVertical: 13,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 4,
     shadowColor: '#6366f1',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  submitBtnContent: {
+  primaryBtnRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  submitBtnText: {
-    fontSize: 15,
+  primaryBtnText: {
+    fontSize: 14.5,
     fontWeight: '700',
     color: '#ffffff',
   },
+
+  /* Divider */
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 14,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#334155',
+  },
+  dividerText: {
+    fontSize: 11.5,
+    color: '#64748b',
+    marginHorizontal: 10,
+    fontWeight: '600',
+  },
+
+  /* Guest */
   guestBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(99, 102, 241, 0.12)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    marginTop: 12,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    borderRadius: 12,
+    paddingVertical: 11,
     borderWidth: 1,
-    borderColor: '#6366f1',
+    borderColor: 'rgba(99, 102, 241, 0.25)',
+    gap: 6,
   },
   guestBtnText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#818cf8',
-    marginLeft: 6,
   },
+
+  /* Footer */
   footerText: {
     fontSize: 11,
-    color: '#64748b',
-    marginTop: 24,
+    color: '#475569',
+    textAlign: 'center',
+    marginTop: 20,
   },
 });

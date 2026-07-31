@@ -1,17 +1,35 @@
 {
   "expo": {
-    "name": "QuizApp",
-    "slug": "quiz-app",
+    "name": "QUIZZY",
+    "slug": "quizzy",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0f172a",
-    "android": {
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#0f172a"
+    },
+    "android": {
+      "backgroundColor": "#0f172a",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "package": "com.dhrub4545.quizzy"
     },
     "ios": {
       "supportsTablet": true,
-      "backgroundColor": "#0f172a"
-    }
+      "backgroundColor": "#0f172a",
+      "bundleIdentifier": "com.dhrub4545.quizzy"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "740787c2-e30c-4d52-b9fb-f5e0a918a765"
+      }
+    },
+    "owner": "dhrub4545"
   }
 }
