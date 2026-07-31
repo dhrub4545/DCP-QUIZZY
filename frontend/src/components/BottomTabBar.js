@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Home, BookOpen, Plus, Clock } from 'lucide-react-native';
+import { Home, BookOpen, Plus, Clock, User } from 'lucide-react-native';
 
 /**
  * BottomTabBar component
- * Fixed bottom navigation bar featuring Home, Quizzes, Add Quiz (+), and History tabs.
+ * Fixed bottom navigation bar featuring Home, Quizzes, Add Quiz (+), History, and Profile tabs.
  */
 export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) {
   return (
@@ -16,7 +16,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
         activeOpacity={0.7}
       >
         <Home
-          size={20}
+          size={19}
           color={activeTab === 'Home' ? '#818cf8' : '#64748b'}
         />
         <Text style={[styles.tabLabel, activeTab === 'Home' && styles.activeTabLabel]}>
@@ -31,7 +31,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
         activeOpacity={0.7}
       >
         <BookOpen
-          size={20}
+          size={19}
           color={activeTab === 'Quizzes' ? '#818cf8' : '#64748b'}
         />
         <Text style={[styles.tabLabel, activeTab === 'Quizzes' && styles.activeTabLabel]}>
@@ -58,11 +58,26 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
         activeOpacity={0.7}
       >
         <Clock
-          size={20}
+          size={19}
           color={activeTab === 'History' ? '#818cf8' : '#64748b'}
         />
         <Text style={[styles.tabLabel, activeTab === 'History' && styles.activeTabLabel]}>
           History
+        </Text>
+      </TouchableOpacity>
+
+      {/* Profile Tab */}
+      <TouchableOpacity
+        style={styles.tabItem}
+        onPress={() => onTabPress('Profile')}
+        activeOpacity={0.7}
+      >
+        <User
+          size={19}
+          color={activeTab === 'Profile' ? '#818cf8' : '#64748b'}
+        />
+        <Text style={[styles.tabLabel, activeTab === 'Profile' && styles.activeTabLabel]}>
+          Profile
         </Text>
       </TouchableOpacity>
     </View>

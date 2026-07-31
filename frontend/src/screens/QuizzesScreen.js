@@ -126,6 +126,8 @@ export default function QuizzesScreen({ navigation }) {
       navigation.navigate('Home');
     } else if (tabName === 'History') {
       navigation.navigate('History');
+    } else if (tabName === 'Profile') {
+      navigation.navigate('Profile');
     }
   };
 

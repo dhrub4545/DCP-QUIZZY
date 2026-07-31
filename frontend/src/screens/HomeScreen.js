@@ -149,6 +149,8 @@ export default function HomeScreen({ navigation, route }) {
       navigation.navigate('Quizzes');
     } else if (tabName === 'History') {
       navigation.navigate('History');
+    } else if (tabName === 'Profile') {
+      navigation.navigate('Profile', { user: route?.params?.user });
     }
   };
 

@@ -235,6 +235,8 @@ export default function HistoryScreen({ navigation }) {
             navigation.navigate('Home');
           } else if (tab === 'Quizzes') {
             navigation.navigate('Quizzes');
+          } else if (tab === 'Profile') {
+            navigation.navigate('Profile');
           }
         }}
         onAddQuizPress={() => {

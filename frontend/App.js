@@ -9,6 +9,7 @@ import QuizzesScreen from './src/screens/QuizzesScreen';
 import TestScreen from './src/screens/TestScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -42,6 +43,7 @@ export default function App() {
         <Stack.Screen name="Test" component={TestScreen} />
         <Stack.Screen name="Result" component={ResultScreen} />
         <Stack.Screen name="History" component={HistoryScreen} options={{ animation: 'none' }} />
+        <Stack.Screen name="Profile" component={ProfileScreen} options={{ animation: 'none' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

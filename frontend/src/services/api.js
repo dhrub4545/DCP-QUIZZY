@@ -153,4 +153,9 @@ export const sendAiChatApi = async (chatPayload) => {
   return response.data;
 };
 
+export const changePasswordApi = async (passwordData) => {
+  const response = await api.post('/auth/change-password', passwordData);
+  return response.data;
+};
+
 export default api;
