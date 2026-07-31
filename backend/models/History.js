@@ -13,6 +13,7 @@ const QuestionAttemptSchema = new mongoose.Schema({
 });
 
 const HistorySchema = new mongoose.Schema({
+  userId: { type: String, default: 'guest', index: true },
   quizId: { type: mongoose.Schema.Types.ObjectId, ref: 'Quiz', required: true },
   quizTitle: { type: String, required: true },
   subject: { type: String, default: 'General' },

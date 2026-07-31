@@ -23,7 +23,10 @@ const saveHistoryAttempt = async (req, res) => {
       return res.status(400).json({ success: false, message: 'quizId and quizTitle are required.' });
     }
 
+    const userId = req.user?.id ? String(req.user.id) : 'guest';
+
     const newHistory = new History({
+      userId,
       quizId,
       quizTitle,
       subject: subject || 'General',
@@ -50,12 +53,27 @@ const saveHistoryAttempt = async (req, res) => {
 };
 
 /**
- * @desc    Get all past test attempts
+ * @desc    Get user-specific past test attempts
  * @route   GET /api/history
  */
 const getAllHistory = async (req, res) => {
   try {
-    const historyList = await History.find().sort({ completedAt: -1 });
+    const userId = req.user?.id ? String(req.user.id) : 'guest';
+
+    let query = {};
+    if (userId === 'guest') {
+      query = {
+        $or: [
+          { userId: 'guest' },
+          { userId: { $exists: false } },
+          { userId: null }
+        ]
+      };
+    } else {
+      query = { userId };
+    }
+
+    const historyList = await History.find(query).sort({ completedAt: -1 });
     return res.status(200).json({
       success: true,
       count: historyList.length,
