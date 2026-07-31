@@ -2,22 +2,25 @@ const { GoogleGenAI } = require('@google/genai');
 
 let keyIndex = 0;
 
+/**
+ * Dynamically retrieves all configured Gemini API keys (GEMINI_API_KEY, GEMINI_API_KEY_1..20)
+ */
 function getAvailableKeys() {
-  return [
-    process.env.GEMINI_API_KEY,
-    process.env.GEMINI_API_KEY_1,
-    process.env.GEMINI_API_KEY_2,
-    process.env.GEMINI_API_KEY_3,
-    process.env.GEMINI_API_KEY_4,
-    process.env.GEMINI_API_KEY_5,
-    process.env.GEMINI_API_KEY_6
-  ].filter(Boolean);
+  const keys = [];
+  if (process.env.GEMINI_API_KEY) keys.push(process.env.GEMINI_API_KEY);
+  for (let i = 1; i <= 20; i++) {
+    const k = process.env[`GEMINI_API_KEY_${i}`];
+    if (k && !keys.includes(k)) {
+      keys.push(k);
+    }
+  }
+  return keys;
 }
 
 function getNextApiKey() {
   const keys = getAvailableKeys();
   if (keys.length === 0) {
-    throw new Error('No GEMINI_API_KEY configured in environment.');
+    throw new Error('No GEMINI_API_KEY configured in environment variables.');
   }
   const key = keys[keyIndex % keys.length];
   keyIndex = (keyIndex + 1) % keys.length;
@@ -28,14 +31,15 @@ const TARGET_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 /**
  * Execute a Gemini AI call using ONLY Gemini 3.6 Flash model across all available Gemini API keys.
- * If an error occurs on one key, automatically tries the next Gemini key.
+ * If an error occurs on one key, automatically tries the next Gemini key in the loop.
+ * If all keys fail after trying every single key, breaks the loop and throws a user-friendly error message.
  */
-async function callGeminiWithFallback(prompt, systemInstruction = '') {
+async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
   let lastError = null;
   const keys = getAvailableKeys();
 
   if (keys.length === 0) {
-    throw new Error('No Gemini API keys found in environment. Please set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.');
+    throw new Error('No Gemini API keys found in environment. Please set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc. in .env');
   }
 
   // Try each Gemini key in sequence
@@ -45,9 +49,12 @@ async function callGeminiWithFallback(prompt, systemInstruction = '') {
 
     try {
       const ai = new GoogleGenAI({ apiKey });
+      
+      const contentsPayload = Array.isArray(contentsInput) ? contentsInput : [contentsInput];
+
       const res = await ai.models.generateContent({
         model: TARGET_MODEL,
-        contents: [prompt],
+        contents: contentsPayload,
         config: {
           systemInstruction: systemInstruction || 'You are an expert AI medical & academic tutor.',
           safetySettings: [
@@ -63,12 +70,14 @@ async function callGeminiWithFallback(prompt, systemInstruction = '') {
         return { text: res.text, modelUsed: TARGET_MODEL };
       }
     } catch (err) {
-      console.warn(`[Gemini Engine] Key ${keyMasked} failed (${err.message}). Trying next Gemini key...`);
+      console.warn(`[Gemini Engine] Key ${keyMasked} attempt (${keyAttempt + 1}/${keys.length}) failed: ${err.message}. Trying next key...`);
       lastError = err;
     }
   }
 
-  throw new Error(`All ${keys.length} Gemini API keys failed for model ${TARGET_MODEL}. Last error: ${lastError?.message || 'Unknown error'}`);
+  // All keys in loop completed with errors
+  console.error(`[Gemini Engine] All ${keys.length} API keys failed. Returning try later error.`);
+  throw new Error('All Gemini AI servers are currently busy or rate-limited. Please try again later.');
 }
 
 /**
@@ -99,9 +108,9 @@ Provide an in-depth, highly educational explanation for this question formatted 
 }
 
 /**
- * Multi-turn conversational AI Tutor chat pre-fed with question context
+ * Multi-turn conversational AI Tutor chat pre-fed with question context + optional photo attachment
  */
-async function chatWithAiTutor({ questionContext, chatHistory = [], userMessage }) {
+async function chatWithAiTutor({ questionContext, chatHistory = [], userMessage, imageBase64 }) {
   const { questionText, options, correctAnswerLetter, userLetter, explanation } = questionContext || {};
 
   const contextHeader = `PRE-FED QUESTION CONTEXT:
@@ -117,8 +126,21 @@ async function chatWithAiTutor({ questionContext, chatHistory = [], userMessage 
   });
   conversationTranscript += `Student: ${userMessage}\n\nAI Tutor:`;
 
+  const contentsPayload = [conversationTranscript];
+
+  // Include image attachment if provided
+  if (imageBase64) {
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    contentsPayload.push({
+      inlineData: {
+        data: cleanBase64,
+        mimeType: 'image/jpeg'
+      }
+    });
+  }
+
   const systemInstruction = 'You are a friendly, encouraging AI exam prep tutor. Answer the student\'s follow-up questions clearly, concisely, and accurately based on the pre-fed question context.';
-  const result = await callGeminiWithFallback(conversationTranscript, systemInstruction);
+  const result = await callGeminiWithFallback(contentsPayload, systemInstruction);
   return result.text;
 }
 
