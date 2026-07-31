@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 
-const JWT_SECRET = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET || 'quizzy_jwt_secure_secret_key_2026_super_safe';
+const JWT_SECRET = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET_KEY is missing in environment variables.');
+}
 
 function base64UrlEncode(str) {
   return Buffer.from(str)
