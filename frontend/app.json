@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "QuizApp",
+    "slug": "quiz-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f172a",
+    "android": {
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "backgroundColor": "#0f172a"
+    }
+  }
+}

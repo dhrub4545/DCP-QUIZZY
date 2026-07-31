@@ -1,0 +1,158 @@
+import React, { useState, useEffect } from 'react';
+import Navbar from './components/Navbar';
+import UploadModal from './components/UploadModal';
+import TestConfigModal from './components/TestConfigModal';
+import HomeScreen from './screens/HomeScreen';
+import TestScreen from './screens/TestScreen';
+import ResultScreen from './screens/ResultScreen';
+import { fetchQuizzes, fetchQuizById, deleteQuiz } from './services/api';
+
+export default function App() {
+  const [screen, setScreen] = useState('home'); // 'home' | 'test' | 'result'
+  const [quizzes, setQuizzes] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Modals
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [selectedQuiz, setSelectedQuiz] = useState(null);
+
+  // Test session state
+  const [activeTestConfig, setActiveTestConfig] = useState(null);
+  const [testSummary, setTestSummary] = useState(null);
+
+  const loadQuizzes = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchQuizzes();
+      if (data && data.quizzes) {
+        setQuizzes(data.quizzes);
+      }
+    } catch (err) {
+      console.error('Error fetching quizzes:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadQuizzes();
+  }, []);
+
+  const handleSelectQuiz = async (quizSummary) => {
+    try {
+      const data = await fetchQuizById(quizSummary._id);
+      if (data && data.quiz) {
+        setSelectedQuiz(data.quiz);
+        setIsConfigOpen(true);
+      }
+    } catch (err) {
+      console.error('Error loading quiz questions:', err);
+      alert('Could not fetch quiz questions.');
+    }
+  };
+
+  const handleDeleteQuiz = async (quizId) => {
+    if (!window.confirm('Are you sure you want to delete this PDF quiz from MongoDB?')) return;
+    try {
+      await deleteQuiz(quizId);
+      loadQuizzes();
+    } catch (err) {
+      console.error('Error deleting quiz:', err);
+    }
+  };
+
+  const handleStartTest = (config) => {
+    setIsConfigOpen(false);
+
+    let preparedQuestions = [...config.quiz.questions];
+
+    // Randomize Questions if enabled
+    if (config.randomizeQuestions) {
+      preparedQuestions.sort(() => Math.random() - 0.5);
+    }
+
+    // Limit question count
+    preparedQuestions = preparedQuestions.slice(0, config.numQuestions);
+
+    // Randomize options if enabled
+    if (config.randomizeOptions) {
+      preparedQuestions = preparedQuestions.map((q) => {
+        const shuffled = [...q.options].map((opt, i) => ({ opt, isCorrect: i === q.correctOptionIndex }));
+        shuffled.sort(() => Math.random() - 0.5);
+
+        const newOptions = shuffled.map(s => s.opt);
+        const newCorrectIdx = shuffled.findIndex(s => s.isCorrect);
+
+        return {
+          ...q,
+          options: newOptions,
+          correctOptionIndex: newCorrectIdx,
+          correctAnswerLetter: String.fromCharCode(65 + newCorrectIdx)
+        };
+      });
+    }
+
+    setActiveTestConfig({
+      quizTitle: config.quiz.title,
+      questions: preparedQuestions,
+      timePerQuestion: config.timePerQuestion
+    });
+
+    setScreen('test');
+  };
+
+  const handleFinishTest = (summary) => {
+    setTestSummary(summary);
+    setScreen('result');
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {screen === 'home' && (
+        <>
+          <Navbar onOpenUpload={() => setIsUploadOpen(true)} />
+          <HomeScreen
+            quizzes={quizzes}
+            loading={loading}
+            onOpenUpload={() => setIsUploadOpen(true)}
+            onSelectQuiz={handleSelectQuiz}
+            onDeleteQuiz={handleDeleteQuiz}
+          />
+        </>
+      )}
+
+      {screen === 'test' && activeTestConfig && (
+        <TestScreen
+          config={activeTestConfig}
+          onFinishTest={handleFinishTest}
+          onCancelTest={() => setScreen('home')}
+        />
+      )}
+
+      {screen === 'result' && testSummary && (
+        <ResultScreen
+          summary={testSummary}
+          onRetake={() => setScreen('test')}
+          onGoHome={() => setScreen('home')}
+        />
+      )}
+
+      {/* Modals */}
+      <UploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onUploadSuccess={() => {
+          loadQuizzes();
+        }}
+      />
+
+      <TestConfigModal
+        isOpen={isConfigOpen}
+        quiz={selectedQuiz}
+        onClose={() => setIsConfigOpen(false)}
+        onStartTest={handleStartTest}
+      />
+    </div>
+  );
+}

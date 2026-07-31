@@ -1,0 +1,222 @@
+Algorithm: ProcessPDF(pdf)
+
+1. Validate PDF
+    IF pdf is corrupted
+        RETURN Error
+
+    IF page_count == 0
+        RETURN Error
+
+2. Detect PDF Type
+
+    IF selectable_text_ratio > threshold
+        mode = DIGITAL
+    ELSE
+        mode = SCANNED
+
+3. Convert PDF
+
+    FOR every page
+        Render page to PNG (300 DPI)
+
+4. Image Enhancement
+
+    FOR every image
+        Deskew
+        Denoise
+        Adaptive Threshold
+        Sharpen
+        Remove Borders
+
+5. Layout Detection
+
+    Detect:
+        Question Region
+        Option Region
+        Explanation Region
+        Image Region
+        Table Region
+        Header
+        Footer
+        Page Number
+
+    Ignore:
+        Header
+        Footer
+        Page Number
+
+6. Runtime Layout Learning
+
+    Analyze first N pages
+
+    Learn:
+        Numbering Style
+        Option Style
+        Reading Order
+        Column Count
+        Answer Pattern
+        Explanation Pattern
+
+    Freeze Runtime Rules
+
+7. OCR
+
+    OCR every region separately
+
+    Never OCR full page
+
+...
+
+This is the style that AI models understand best.
+
+I actually recommend making it like a compiler specification:
+MAIN()
+
+↓
+
+Validate()
+
+↓
+
+DetectPDFType()
+
+↓
+
+ExtractPages()
+
+↓
+
+EnhanceImages()
+
+↓
+
+DetectLayout()
+
+↓
+
+LearnRuntimeRules()
+
+↓
+
+OCRRegions()
+
+↓
+
+BuildReadingOrder()
+
+↓
+
+BuildDocumentGraph()
+
+↓
+
+BuildQuestions()
+
+↓
+
+MergeContinuation()
+
+↓
+
+ExtractTables()
+
+↓
+
+ExtractImages()
+
+↓
+
+MatchAnswers()
+
+↓
+
+ValidateQuestions()
+
+↓
+
+CalculateConfidence()
+
+↓
+
+AIFallback()
+
+↓
+
+UploadAssets()
+
+↓
+
+SaveMongoDB()
+
+↓
+
+GenerateReport()
+
+Then for every function define:
+
+Input
+Output
+Preconditions
+Processing steps
+Decision conditions
+Edge cases
+Fallback logic
+Failure handling
+This is the format I would use
+FUNCTION: BuildQuestions()
+
+INPUT
+------
+Document Graph
+
+OUTPUT
+-------
+Question Objects
+
+PROCESS
+--------
+FOR each Question Node
+
+    Create CurrentQuestion
+
+    WHILE NextNode != Question
+
+        IF Option
+            Append Option
+
+        IF Explanation
+            Append Explanation
+
+        IF Image
+            Attach Image
+
+        IF Table
+            Attach Table
+
+RETURN Question Object
+
+EDGE CASES
+----------
+Question continues to next page
+
+↓
+
+Merge
+
+Question without options
+
+↓
+
+Mark Invalid
+
+Explanation before answer
+
+↓
+
+Store
+
+Answer table missing
+
+↓
+
+AI Fallback
