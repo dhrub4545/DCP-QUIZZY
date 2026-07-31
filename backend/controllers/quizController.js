@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Quiz = require('../models/Quiz');
 
 /**
@@ -322,37 +323,54 @@ const generateCustomQuiz = async (req, res) => {
       });
     }
 
-    let combinedQuestions = [];
-
-    // Helper for Fisher-Yates random sampling
-    const sampleRandom = (arr, count) => {
-      const clone = [...arr];
-      for (let i = clone.length - 1; i > 0; i--) {
+    // High-entropy Fisher-Yates shuffle helper
+    const shuffleArray = (array) => {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [clone[i], clone[j]] = [clone[j], clone[i]];
+        [arr[i], arr[j]] = [arr[j], arr[i]];
       }
-      return clone.slice(0, Math.min(count, clone.length));
+      return arr;
     };
+
+    let combinedQuestions = [];
 
     for (const src of sources) {
       const { quizId, count } = src;
       const requestedCount = Number(count) || 0;
       if (!quizId || requestedCount <= 0) continue;
 
-      const quizDoc = await Quiz.findById(quizId);
+      let quizDoc = null;
+      if (mongoose.Types.ObjectId.isValid(quizId)) {
+        quizDoc = await Quiz.findById(quizId);
+      } else {
+        quizDoc = await Quiz.findOne({
+          $or: [{ title: quizId }, { subject: quizId }]
+        });
+      }
+
       if (quizDoc && Array.isArray(quizDoc.questions) && quizDoc.questions.length > 0) {
-        const sampled = sampleRandom(quizDoc.questions, requestedCount);
-        // Ensure questions retain source topic / subject tag
+        // Convert subdocuments to plain objects so shuffling works seamlessly
+        const rawQuestions = quizDoc.questions.map(q => (typeof q.toObject === 'function' ? q.toObject() : q));
+        
+        // 1. Fully shuffle ALL available questions in this source (e.g., all 1144 questions in Medicine)
+        const fullyShuffled = shuffleArray(rawQuestions);
+        
+        // 2. Pick requestedCount questions randomly from the shuffled pool
+        const sampled = fullyShuffled.slice(0, Math.min(requestedCount, fullyShuffled.length));
+
+        // 3. Tag and clean questions
         const tagged = sampled.map(q => ({
           questionNumber: q.questionNumber,
           topic: q.topic || quizDoc.subject || 'General',
           questionText: q.questionText,
-          options: q.options,
-          correctOptionIndex: q.correctOptionIndex,
-          correctAnswerLetter: q.correctAnswerLetter,
-          explanation: q.explanation,
-          confidence: q.confidence
+          options: Array.isArray(q.options) ? q.options.map(o => String(o).trim()) : [],
+          correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
+          correctAnswerLetter: q.correctAnswerLetter || 'A',
+          explanation: q.explanation || 'No explanation provided.',
+          confidence: q.confidence || 1.0
         }));
+
         combinedQuestions.push(...tagged);
       }
     }
@@ -364,9 +382,10 @@ const generateCustomQuiz = async (req, res) => {
       });
     }
 
-    // Shuffle final combined questions array
-    combinedQuestions = sampleRandom(combinedQuestions, combinedQuestions.length);
-    // Re-index question numbers sequentially
+    // Final shuffle of combined questions across all selected sources
+    combinedQuestions = shuffleArray(combinedQuestions);
+
+    // Re-index question numbers sequentially (1 to N)
     combinedQuestions.forEach((q, idx) => {
       q.questionNumber = idx + 1;
     });
