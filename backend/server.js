@@ -22,6 +22,23 @@ app.use(cors());
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
+// Root Endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Welcome to Quizzy API Server 🚀',
+    version: '1.0.0',
+    status: 'Active',
+    endpoints: {
+      health: '/health',
+      auth: '/api/auth',
+      quizzes: '/api/quizzes',
+      history: '/api/history',
+      ai: '/api/ai'
+    }
+  });
+});
+
 // Health Check Route
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Backend service is healthy' });
