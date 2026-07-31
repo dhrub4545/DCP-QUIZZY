@@ -1,8 +1,10 @@
 const User = require('../models/User');
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { generateToken } = require('../utils/jwt');
 
-function hashPassword(password) {
+// Legacy sha256 fallback helper for existing users
+function legacySha256(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
 }
 
@@ -13,15 +15,23 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, email, and password are required.' });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    }
+
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
     }
 
+    // Hash password with bcrypt (10 salt rounds)
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
     const user = new User({
       name: name.trim(),
       email: email.toLowerCase().trim(),
-      passwordHash: hashPassword(password)
+      passwordHash
     });
 
     await user.save();
@@ -55,7 +65,26 @@ exports.login = async (req, res) => {
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user || user.passwordHash !== hashPassword(password)) {
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+    }
+
+    let isMatch = false;
+
+    // 1. Try bcrypt comparison
+    if (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$')) {
+      isMatch = await bcrypt.compare(password, user.passwordHash);
+    } else {
+      // 2. Legacy SHA-256 fallback (Auto-migrate to bcrypt upon successful match)
+      if (user.passwordHash === legacySha256(password)) {
+        isMatch = true;
+        const salt = await bcrypt.genSalt(10);
+        user.passwordHash = await bcrypt.hash(password, salt);
+        await user.save();
+      }
+    }
+
+    if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
