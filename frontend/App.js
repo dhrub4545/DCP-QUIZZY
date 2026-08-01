@@ -10,6 +10,7 @@ import TestScreen from './src/screens/TestScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import StudyScreen from './src/screens/StudyScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -40,6 +41,7 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ animation: 'none' }} />
         <Stack.Screen name="Quizzes" component={QuizzesScreen} options={{ animation: 'none' }} />
+        <Stack.Screen name="Study" component={StudyScreen} options={{ animation: 'none' }} />
         <Stack.Screen name="Test" component={TestScreen} />
         <Stack.Screen name="Result" component={ResultScreen} />
         <Stack.Screen name="History" component={HistoryScreen} options={{ animation: 'none' }} />

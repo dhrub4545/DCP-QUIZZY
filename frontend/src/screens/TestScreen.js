@@ -165,14 +165,14 @@ export default function TestScreen({ route, navigation }) {
     }));
   };
 
-  const optionLabels = ['A', 'B', 'C', 'D'];
+  const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
 
   return (
     <SafeAreaView style={styles.container}>
       {/* Top Header Navigation */}
       <View style={styles.topNav}>
         <TouchableOpacity style={styles.iconNavBtn} onPress={() => confirmSubmitTest()}>
-          <X color="#94a3b8" size={22} />
+          <X color="#94a3b8" size={20} />
         </TouchableOpacity>
 
         <View style={styles.titleBox}>
@@ -182,7 +182,7 @@ export default function TestScreen({ route, navigation }) {
 
         {activeConfig?.timerSeconds > 0 && (
           <View style={[styles.timerBadge, timeLeft <= 5 && styles.timerBadgeLow]}>
-            <Clock color={timeLeft <= 5 ? '#f87171' : '#818cf8'} size={14} />
+            <Clock color={timeLeft <= 5 ? '#f87171' : '#818cf8'} size={13} />
             <Text style={[styles.timerText, timeLeft <= 5 && styles.timerTextLow]}>{timeLeft}s</Text>
           </View>
         )}
@@ -198,8 +198,8 @@ export default function TestScreen({ route, navigation }) {
         />
       </View>
 
-      {/* Question Content Scroll */}
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      {/* Question Content Scroll - Compact Space Optimized */}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.questionCard}>
           <View style={styles.qNumBadge}>
             <Text style={styles.qNumBadgeText}>Q{currentIndex + 1}</Text>
@@ -209,7 +209,7 @@ export default function TestScreen({ route, navigation }) {
           </Text>
         </View>
 
-        {/* Options */}
+        {/* Compact Options List */}
         <View style={styles.optionsList}>
           {(currentQ?.options || []).map((optText, optIdx) => {
             const isSelected = userAnswers[currentIndex] === optIdx;
@@ -236,7 +236,7 @@ export default function TestScreen({ route, navigation }) {
                       isSelected && styles.optionLabelTextSelected,
                     ]}
                   >
-                    {optionLabels[optIdx]}
+                    {optionLabels[optIdx] || optIdx + 1}
                   </Text>
                 </View>
                 <Text
@@ -259,7 +259,7 @@ export default function TestScreen({ route, navigation }) {
               style={styles.expToggleBtn}
               onPress={() => setShowExplanation(!showExplanation)}
             >
-              <HelpCircle color="#a855f7" size={16} />
+              <HelpCircle color="#a855f7" size={15} />
               <Text style={styles.expToggleText}>
                 {showExplanation ? 'Hide Explanation' : 'View Explanation'}
               </Text>
@@ -282,7 +282,7 @@ export default function TestScreen({ route, navigation }) {
           disabled={currentIndex === 0}
           onPress={handlePrevQuestion}
         >
-          <ArrowLeft color={currentIndex === 0 ? '#475569' : '#f8fafc'} size={18} />
+          <ArrowLeft color={currentIndex === 0 ? '#475569' : '#f8fafc'} size={16} />
           <Text style={[styles.navBtnText, currentIndex === 0 && styles.navBtnTextDisabled]}>
             Previous
           </Text>
@@ -290,13 +290,13 @@ export default function TestScreen({ route, navigation }) {
 
         {isLastQuestion ? (
           <TouchableOpacity style={styles.submitBtn} onPress={confirmSubmitTest}>
-            <CheckCircle color="#ffffff" size={18} style={{ marginRight: 6 }} />
+            <CheckCircle color="#ffffff" size={16} style={{ marginRight: 5 }} />
             <Text style={styles.submitBtnText}>Submit Test</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.nextBtn} onPress={handleNextQuestion}>
             <Text style={styles.nextBtnText}>Next</Text>
-            <ArrowRight color="#ffffff" size={18} style={{ marginLeft: 6 }} />
+            <ArrowRight color="#ffffff" size={16} style={{ marginLeft: 5 }} />
           </TouchableOpacity>
         )}
       </View>
@@ -323,32 +323,32 @@ const styles = StyleSheet.create({
   topNav: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   iconNavBtn: {
-    padding: 6,
+    padding: 4,
   },
   titleBox: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: 8,
   },
   navTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#f8fafc',
   },
   navSubtitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#94a3b8',
   },
   timerBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#6366f1',
   },
@@ -359,14 +359,14 @@ const styles = StyleSheet.create({
   timerText: {
     color: '#818cf8',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
     marginLeft: 4,
   },
   timerTextLow: {
     color: '#f87171',
   },
   progressTrack: {
-    height: 4,
+    height: 3,
     backgroundColor: '#1e293b',
     width: '100%',
   },
@@ -375,45 +375,47 @@ const styles = StyleSheet.create({
     backgroundColor: '#6366f1',
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   questionCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#334155',
   },
   qNumBadge: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginBottom: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginBottom: 6,
   },
   qNumBadgeText: {
     color: '#818cf8',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   questionText: {
-    fontSize: 17,
+    fontSize: 15.5,
     fontWeight: '600',
     color: '#f8fafc',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   optionsList: {
-    gap: 12,
+    gap: 6,
   },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1e293b',
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     borderWidth: 1.5,
     borderColor: '#334155',
   },
@@ -422,19 +424,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(99, 102, 241, 0.12)',
   },
   optionLabelCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: '#334155',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
+    marginRight: 10,
   },
   optionLabelCircleSelected: {
     backgroundColor: '#6366f1',
   },
   optionLabelText: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: '700',
     color: '#cbd5e1',
   },
@@ -442,17 +444,17 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   optionText: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#cbd5e1',
     flex: 1,
-    lineHeight: 20,
+    lineHeight: 19,
   },
   optionTextSelected: {
     color: '#f8fafc',
     fontWeight: '600',
   },
   explanationSection: {
-    marginTop: 24,
+    marginTop: 14,
   },
   expToggleBtn: {
     flexDirection: 'row',
@@ -461,35 +463,35 @@ const styles = StyleSheet.create({
   },
   expToggleText: {
     color: '#c084fc',
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '600',
-    marginLeft: 6,
+    marginLeft: 5,
   },
   expBox: {
-    marginTop: 10,
+    marginTop: 8,
     backgroundColor: 'rgba(168, 85, 247, 0.1)',
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 10,
+    padding: 10,
     borderWidth: 1,
     borderColor: 'rgba(168, 85, 247, 0.3)',
   },
   expTitle: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '700',
     color: '#c084fc',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   expBody: {
-    fontSize: 13,
+    fontSize: 12.5,
     color: '#e2e8f0',
-    lineHeight: 18,
+    lineHeight: 17,
   },
   bottomBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
     backgroundColor: '#1e293b',
     borderTopWidth: 1,
     borderColor: '#334155',
@@ -497,9 +499,9 @@ const styles = StyleSheet.create({
   navBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
     backgroundColor: '#334155',
   },
   navBtnDisabled: {
@@ -508,8 +510,8 @@ const styles = StyleSheet.create({
   navBtnText: {
     color: '#f8fafc',
     fontWeight: '600',
-    fontSize: 14,
-    marginLeft: 6,
+    fontSize: 13,
+    marginLeft: 5,
   },
   navBtnTextDisabled: {
     color: '#475569',
@@ -518,26 +520,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#6366f1',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
   },
   nextBtnText: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
   submitBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#22c55e',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
   },
   submitBtnText: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
 });

@@ -1,16 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, PanResponder } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, PanResponder, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Maximize2, X, ZoomIn, ZoomOut, RotateCcw, MoveHorizontal } from 'lucide-react-native';
 
+function formatCellText(text) {
+  if (!text) return '';
+  let cleaned = String(text).trim();
+  cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
+  return cleaned;
+}
+
+function normalizeTableRows(headers, rawRows) {
+  if (!rawRows || !Array.isArray(rawRows)) return [];
+  const normalizedRows = [];
+
+  rawRows.forEach((row) => {
+    if (!Array.isArray(row)) return;
+    const cellLines = row.map((cell) =>
+      formatCellText(cell)
+        .split('\n')
+        .map((l) => l.trim())
+    );
+
+    const maxLines = Math.max(...cellLines.map((lines) => lines.length), 1);
+
+    for (let lineIdx = 0; lineIdx < maxLines; lineIdx++) {
+      const rowLine = cellLines.map((lines) => lines[lineIdx] || '');
+      normalizedRows.push(rowLine);
+    }
+  });
+
+  return normalizedRows;
+}
+
 /**
  * Interactive A4 Table Renderer Component
- * Locks table layout to standard A4 document width (794px) with dedicated column proportions:
- * Short metadata columns get fixed width (~100px), while long description/paragraph columns get
- * the remaining space (~270px) so sentences wrap naturally.
- * Includes interactive Zoom controls (Fit A4 / 100% / 150% / 200%), smooth two-finger pinch-to-zoom, and Fullscreen A4 Inspection Sheet.
+ * Locks table layout to standard A4 document width (794px) with dedicated column proportions.
+ * Supports light theme for Study Mode and dark theme for default app mode.
  */
-function InteractiveTableRenderer({ block }) {
+function InteractiveTableRenderer({ block, theme = 'dark' }) {
+  const isLight = theme === 'light';
+
   const [zoomModalVisible, setZoomModalVisible] = useState(false);
   const [zoomScale, setZoomScale] = useState(1.0);
   const [isPinching, setIsPinching] = useState(false);
@@ -76,7 +106,6 @@ function InteractiveTableRenderer({ block }) {
     if (colCount === 3) return colIdx < 2 ? 180 : A4_WIDTH - 384;
     if (colCount === 4) return colIdx < 3 ? 140 : A4_WIDTH - 444;
 
-    // 5 or more columns (e.g. 6 columns: Name, Continuous, Pitch, Timing, Quality, Associated Conditions)
     if (colIdx < colCount - 1) {
       return Math.max(100, Math.floor(520 / (colCount - 1)));
     } else {
@@ -98,21 +127,41 @@ function InteractiveTableRenderer({ block }) {
   };
 
   const renderA4TableBody = () => (
-    <View style={[styles.a4TableContainer, { width: A4_WIDTH }]}>
+    <View
+      style={[
+        styles.a4TableContainer,
+        { width: A4_WIDTH },
+        isLight && { backgroundColor: '#ffffff', borderColor: '#cbd5e1' },
+      ]}
+    >
       {/* Table Header */}
       {block.headers.length > 0 && (
-        <View style={styles.tableHeaderRow}>
+        <View
+          style={[
+            styles.tableHeaderRow,
+            isLight && { backgroundColor: '#f1f5f9', borderBottomColor: '#cbd5e1' },
+          ]}
+        >
           {block.headers.map((cell, cIdx) => (
             <View
               key={cIdx}
               style={[
                 styles.tableCell,
                 styles.tableHeaderCell,
+                isLight && { backgroundColor: '#f1f5f9' },
                 { width: getColWidth(cIdx) },
-                cIdx < block.headers.length - 1 && styles.cellRightBorder,
+                cIdx < block.headers.length - 1 &&
+                  (isLight ? { borderRightWidth: 1, borderRightColor: '#cbd5e1' } : styles.cellRightBorder),
               ]}
             >
-              <Text style={styles.tableHeaderText}>{formatCellText(cell)}</Text>
+              <Text
+                style={[
+                  styles.tableHeaderText,
+                  isLight && { color: '#4338ca', fontWeight: '800' },
+                ]}
+              >
+                {formatCellText(cell)}
+              </Text>
             </View>
           ))}
         </View>
@@ -124,7 +173,8 @@ function InteractiveTableRenderer({ block }) {
           key={rIdx}
           style={[
             styles.tableRow,
-            rIdx % 2 === 1 && styles.tableRowAlt,
+            isLight && { borderBottomColor: '#e2e8f0' },
+            rIdx % 2 === 1 && (isLight ? { backgroundColor: '#f8fafc' } : styles.tableRowAlt),
             rIdx === synchronizedRows.length - 1 && styles.tableRowLast,
           ]}
         >
@@ -134,11 +184,12 @@ function InteractiveTableRenderer({ block }) {
               style={[
                 styles.tableCell,
                 { width: getColWidth(cIdx) },
-                cIdx < row.length - 1 && styles.cellRightBorder,
+                cIdx < row.length - 1 &&
+                  (isLight ? { borderRightWidth: 1, borderRightColor: '#e2e8f0' } : styles.cellRightBorder),
               ]}
             >
-              <Text style={styles.tableCellText}>
-                {renderFormattedInlineText(cellText)}
+              <Text style={[styles.tableCellText, isLight && { color: '#0f172a' }]}>
+                {renderFormattedInlineText(cellText, theme)}
               </Text>
             </View>
           ))}
@@ -151,13 +202,20 @@ function InteractiveTableRenderer({ block }) {
     <View style={styles.tableWrapper}>
       {/* Table Header Bar */}
       <View style={styles.tableActionBar}>
-        <View style={styles.tableBadge}>
-          <MoveHorizontal size={14} color="#818cf8" style={{ marginRight: 4 }} />
-          <Text style={styles.tableBadgeText}>Fixed A4 Format ({colCount} Cols)</Text>
+        <View
+          style={[
+            styles.tableBadge,
+            isLight && { backgroundColor: '#e0e7ff', borderColor: '#c7d2fe' },
+          ]}
+        >
+          <MoveHorizontal size={14} color={isLight ? '#4338ca' : '#818cf8'} style={{ marginRight: 4 }} />
+          <Text style={[styles.tableBadgeText, isLight && { color: '#4338ca' }]}>
+            Fixed A4 Format ({colCount} Cols)
+          </Text>
         </View>
 
         <TouchableOpacity
-          style={styles.zoomBtn}
+          style={[styles.zoomBtn, isLight && { backgroundColor: '#4338ca' }]}
           onPress={() => {
             setZoomScale(1.0);
             setZoomModalVisible(true);
@@ -186,12 +244,24 @@ function InteractiveTableRenderer({ block }) {
         transparent={false}
         onRequestClose={() => setZoomModalVisible(false)}
       >
-        <SafeAreaView style={styles.zoomModalContainer}>
+        <SafeAreaView
+          style={[
+            styles.zoomModalContainer,
+            isLight && { backgroundColor: '#f8fafc' },
+          ]}
+        >
           {/* Modal Header Controls */}
-          <View style={styles.zoomModalHeader}>
+          <View
+            style={[
+              styles.zoomModalHeader,
+              isLight && { backgroundColor: '#ffffff', borderBottomColor: '#e2e8f0' },
+            ]}
+          >
             <View style={{ flex: 1 }}>
-              <Text style={styles.zoomModalTitle}>A4 Document Table Inspection</Text>
-              <Text style={styles.zoomModalSubtitle}>
+              <Text style={[styles.zoomModalTitle, isLight && { color: '#0f172a' }]}>
+                A4 Document Table Inspection
+              </Text>
+              <Text style={[styles.zoomModalSubtitle, isLight && { color: '#64748b' }]}>
                 Format: 794px A4 Width • Scale: {Math.round(zoomScale * 100)}% • Pinch to zoom ✌️
               </Text>
             </View>
@@ -201,13 +271,18 @@ function InteractiveTableRenderer({ block }) {
               style={styles.zoomCloseBtn}
               onPress={() => setZoomModalVisible(false)}
             >
-              <X size={18} color="#f8fafc" />
+              <X size={18} color="#ffffff" />
             </TouchableOpacity>
           </View>
 
           {/* Quick Preset Zoom Scale Toolbar */}
-          <View style={styles.zoomPresetToolbar}>
-            <Text style={styles.presetLabel}>Zoom:</Text>
+          <View
+            style={[
+              styles.zoomPresetToolbar,
+              isLight && { backgroundColor: '#ffffff', borderBottomColor: '#e2e8f0' },
+            ]}
+          >
+            <Text style={[styles.presetLabel, isLight && { color: '#64748b' }]}>Zoom:</Text>
             {[
               { label: 'Fit', scale: 0.45 },
               { label: '75%', scale: 0.75 },
@@ -219,6 +294,7 @@ function InteractiveTableRenderer({ block }) {
                 key={preset.label}
                 style={[
                   styles.presetChip,
+                  isLight && { backgroundColor: '#e2e8f0' },
                   Math.abs(zoomScale - preset.scale) < 0.05 && styles.presetChipActive,
                 ]}
                 onPress={() => handleSetScale(preset.scale)}
@@ -226,6 +302,7 @@ function InteractiveTableRenderer({ block }) {
                 <Text
                   style={[
                     styles.presetChipText,
+                    isLight && { color: '#334155' },
                     Math.abs(zoomScale - preset.scale) < 0.05 && styles.presetChipTextActive,
                   ]}
                 >
@@ -235,11 +312,17 @@ function InteractiveTableRenderer({ block }) {
             ))}
 
             <View style={{ flexDirection: 'row', gap: 4, marginLeft: 'auto' }}>
-              <TouchableOpacity style={styles.zoomControlBtn} onPress={handleZoomOut}>
-                <ZoomOut size={16} color="#f8fafc" />
+              <TouchableOpacity
+                style={[styles.zoomControlBtn, isLight && { backgroundColor: '#e2e8f0' }]}
+                onPress={handleZoomOut}
+              >
+                <ZoomOut size={16} color={isLight ? '#0f172a' : '#f8fafc'} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.zoomControlBtn} onPress={handleZoomIn}>
-                <ZoomIn size={16} color="#f8fafc" />
+              <TouchableOpacity
+                style={[styles.zoomControlBtn, isLight && { backgroundColor: '#e2e8f0' }]}
+                onPress={handleZoomIn}
+              >
+                <ZoomIn size={16} color={isLight ? '#0f172a' : '#f8fafc'} />
               </TouchableOpacity>
             </View>
           </View>
@@ -261,6 +344,7 @@ function InteractiveTableRenderer({ block }) {
                 <View
                   style={[
                     styles.a4PageSheet,
+                    isLight && { backgroundColor: '#ffffff' },
                     { transform: [{ scale: zoomScale }] },
                   ]}
                 >
@@ -276,38 +360,159 @@ function InteractiveTableRenderer({ block }) {
 }
 
 /**
+ * Dedicated Visual Flowchart & Decision Tree Component
+ * Converts text flowcharts into structured visual UI cards with light/dark theme support.
+ */
+function FlowchartTreeRenderer({ text, theme = 'dark' }) {
+  const isLight = theme === 'light';
+  const rawLines = text.split('\n').filter((l) => l.trim().length > 0);
+  const elements = [];
+
+  rawLines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    // 1. Down Arrow Indicator
+    if (trimmed === '↓' || trimmed === '|' || trimmed === 'v' || trimmed === '↓↓') {
+      elements.push(
+        <View key={idx} style={styles.flowArrowContainer}>
+          <View style={[styles.flowLineVertical, isLight && { backgroundColor: '#6366f1' }]} />
+          <Text style={[styles.flowArrowText, isLight && { color: '#4338ca' }]}>↓</Text>
+        </View>
+      );
+      return;
+    }
+
+    // 2. Connector / Slash Branch indicators
+    if (trimmed.includes('↙') || trimmed.includes('↘') || trimmed.includes('├──') || trimmed.includes('└──')) {
+      elements.push(
+        <View key={idx} style={styles.flowBranchLineRow}>
+          <View style={[styles.flowBranchConnectorLine, isLight && { backgroundColor: '#6366f1' }]} />
+        </View>
+      );
+      return;
+    }
+
+    // 3. Side-by-side Branch Nodes e.g. [Infrequent relapses]   [Steroid resistance]
+    const bracketMatches = trimmed.match(/\[[^\]]+\]/g);
+    if (bracketMatches && bracketMatches.length > 1) {
+      elements.push(
+        <View key={idx} style={styles.flowBranchRowContainer}>
+          {bracketMatches.map((bText, bIdx) => (
+            <View
+              key={bIdx}
+              style={[
+                styles.flowNodeCard,
+                styles.flowBranchNodeCard,
+                isLight && { backgroundColor: '#fffbeb', borderColor: '#d97706' },
+              ]}
+            >
+              <Text style={[styles.flowBranchNodeText, isLight && { color: '#b45309' }]}>
+                {bText.slice(1, -1)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      );
+      return;
+    }
+
+    // 4. Single Decision Node e.g. [1st episode of nephrotic syndrome]
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      const nodeText = trimmed.slice(1, -1);
+      elements.push(
+        <View
+          key={idx}
+          style={[
+            styles.flowNodeCard,
+            isLight && { backgroundColor: '#ffffff', borderColor: '#6366f1' },
+          ]}
+        >
+          <Text style={[styles.flowNodeTitleText, isLight && { color: '#0f172a' }]}>
+            {nodeText}
+          </Text>
+        </View>
+      );
+      return;
+    }
+
+    // 5. Medical details note bullet
+    if (trimmed.startsWith('☞') || trimmed.startsWith('•') || trimmed.includes(':')) {
+      elements.push(
+        <View
+          key={idx}
+          style={[
+            styles.flowDetailNoteCard,
+            isLight && { backgroundColor: '#f1f5f9', borderLeftColor: '#2563eb' },
+          ]}
+        >
+          <Text style={[styles.flowDetailNoteText, isLight && { color: '#0f172a' }]}>
+            {renderFormattedInlineText(trimmed, theme)}
+          </Text>
+        </View>
+      );
+      return;
+    }
+
+    // Default Flow Text Line
+    elements.push(
+      <Text key={idx} style={[styles.flowGeneralText, isLight && { color: '#334155' }]}>
+        {renderFormattedInlineText(trimmed, theme)}
+      </Text>
+    );
+  });
+
+  return (
+    <View
+      style={[
+        styles.flowchartContainer,
+        isLight && { backgroundColor: '#f8fafc', borderColor: '#cbd5e1' },
+      ]}
+    >
+      {elements}
+    </View>
+  );
+}
+
+/**
  * Enhanced MarkdownRenderer component
  * Renders Markdown headers, synchronized grid tables, bullet lists, blockquotes, and visual Flowchart Decision Trees.
  */
-export default function MarkdownRenderer({ content, textStyle, style }) {
+export default function MarkdownRenderer({ content, textStyle, theme = 'dark', style }) {
   if (!content) return null;
 
   const blocks = parseMarkdownBlocks(content);
+  const defaultTextColor = theme === 'light' ? '#1e293b' : '#cbd5e1';
 
   return (
     <View style={[styles.container, style]}>
       {blocks.map((block, index) => {
         if (block.type === 'heading') {
           return (
-            <Text key={index} style={[styles.heading, headingStyle(block.level)]}>
+            <Text key={index} style={[styles.heading, headingStyle(block.level, theme)]}>
               {block.text}
             </Text>
           );
         }
 
         if (block.type === 'flowchart') {
-          return <FlowchartTreeRenderer key={index} text={block.text} />;
+          return <FlowchartTreeRenderer key={index} text={block.text} theme={theme} />;
         }
 
         if (block.type === 'table') {
-          return <InteractiveTableRenderer key={index} block={block} />;
+          return <InteractiveTableRenderer key={index} block={block} theme={theme} />;
         }
 
         if (block.type === 'blockquote') {
           return (
-            <View key={index} style={styles.blockquoteContainer}>
-              <Text style={styles.blockquoteText}>
-                {renderFormattedInlineText(block.text)}
+            <View
+              key={index}
+              style={[
+                styles.blockquoteContainer,
+                theme === 'light' && { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1', borderLeftColor: '#6366f1' },
+              ]}
+            >
+              <Text style={[styles.blockquoteText, theme === 'light' && { color: '#0f172a' }]}>
+                {renderFormattedInlineText(block.text, theme)}
               </Text>
             </View>
           );
@@ -330,8 +535,8 @@ export default function MarkdownRenderer({ content, textStyle, style }) {
                     ) : (
                       <View style={styles.bulletDot} />
                     )}
-                    <Text style={[styles.paragraphText, textStyle, { flex: 1 }]}>
-                      {renderFormattedInlineText(textVal)}
+                    <Text style={[styles.paragraphText, { color: defaultTextColor }, textStyle, { flex: 1 }]}>
+                      {renderFormattedInlineText(textVal, theme)}
                     </Text>
                   </View>
                 );
@@ -342,8 +547,8 @@ export default function MarkdownRenderer({ content, textStyle, style }) {
 
         // Default Paragraph
         return (
-          <Text key={index} style={[styles.paragraphText, textStyle]}>
-            {renderFormattedInlineText(block.text)}
+          <Text key={index} style={[styles.paragraphText, { color: defaultTextColor }, textStyle]}>
+            {renderFormattedInlineText(block.text, theme)}
           </Text>
         );
       })}
@@ -351,136 +556,12 @@ export default function MarkdownRenderer({ content, textStyle, style }) {
   );
 }
 
-/**
- * Dedicated Visual Flowchart & Decision Tree Component
- * Converts text flowcharts (nodes, arrows ↓, side-by-side branches) into structured visual UI cards
- */
-function FlowchartTreeRenderer({ text }) {
-  const rawLines = text.split('\n').filter((l) => l.trim().length > 0);
-  const elements = [];
+function parseMarkdownBlocks(text) {
+  if (!text) return [];
 
-  rawLines.forEach((line, idx) => {
-    const trimmed = line.trim();
-
-    // 1. Down Arrow Indicator
-    if (trimmed === '↓' || trimmed === '|' || trimmed === 'v' || trimmed === '↓↓') {
-      elements.push(
-        <View key={idx} style={styles.flowArrowContainer}>
-          <View style={styles.flowLineVertical} />
-          <Text style={styles.flowArrowText}>↓</Text>
-        </View>
-      );
-      return;
-    }
-
-    // 2. Connector / Slash Branch indicators
-    if (trimmed.includes('↙') || trimmed.includes('↘') || trimmed.includes('├──') || trimmed.includes('└──')) {
-      elements.push(
-        <View key={idx} style={styles.flowBranchLineRow}>
-          <View style={styles.flowBranchConnectorLine} />
-        </View>
-      );
-      return;
-    }
-
-    // 3. Side-by-side Branch Nodes e.g. [Infrequent relapses]   [Steroid resistance]
-    const bracketMatches = trimmed.match(/\[[^\]]+\]/g);
-    if (bracketMatches && bracketMatches.length > 1) {
-      elements.push(
-        <View key={idx} style={styles.flowBranchRowContainer}>
-          {bracketMatches.map((bText, bIdx) => (
-            <View key={bIdx} style={[styles.flowNodeCard, styles.flowBranchNodeCard]}>
-              <Text style={styles.flowBranchNodeText}>{bText.slice(1, -1)}</Text>
-            </View>
-          ))}
-        </View>
-      );
-      return;
-    }
-
-    // 4. Single Decision Node e.g. [1st episode of nephrotic syndrome]
-    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      const nodeText = trimmed.slice(1, -1);
-      elements.push(
-        <View key={idx} style={styles.flowNodeCard}>
-          <Text style={styles.flowNodeTitleText}>{nodeText}</Text>
-        </View>
-      );
-      return;
-    }
-
-    // 5. Medical details note bullet
-    if (trimmed.startsWith('☞') || trimmed.startsWith('•') || trimmed.includes(':')) {
-      elements.push(
-        <View key={idx} style={styles.flowDetailNoteCard}>
-          <Text style={styles.flowDetailNoteText}>{renderFormattedInlineText(trimmed)}</Text>
-        </View>
-      );
-      return;
-    }
-
-    // Default Flow Text Line
-    elements.push(
-      <Text key={idx} style={styles.flowGeneralText}>
-        {renderFormattedInlineText(trimmed)}
-      </Text>
-    );
-  });
-
-  return (
-    <View style={styles.flowchartContainer}>
-      {elements}
-    </View>
-  );
-}
-
-/**
- * Synchronizes multiline table cells across columns into 100% aligned table rows
- */
-function normalizeTableRows(headers, rawRows) {
-  const normalizedRows = [];
-
-  rawRows.forEach((row) => {
-    const cellLines = row.map((cell) =>
-      formatCellText(cell)
-        .split('\n')
-        .map((l) => l.trim())
-    );
-
-    const maxLines = Math.max(...cellLines.map((lines) => lines.length), 1);
-
-    if (maxLines > 1) {
-      for (let lineIdx = 0; lineIdx < maxLines; lineIdx++) {
-        const synchronizedRow = cellLines.map((lines) => lines[lineIdx] || '');
-        if (synchronizedRow.some((text) => text.length > 0)) {
-          normalizedRows.push(synchronizedRow);
-        }
-      }
-    } else {
-      normalizedRows.push(row.map((cell) => formatCellText(cell)));
-    }
-  });
-
-  return normalizedRows;
-}
-
-/**
- * Formats cell text by replacing HTML <br> tags with clean line breaks
- */
-function formatCellText(cellText) {
-  if (!cellText) return '';
-  return cellText
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/&nbsp;/gi, ' ')
-    .trim();
-}
-
-/**
- * Parses raw markdown string into block tokens (headings, flowcharts, tables, list, blockquotes, paragraphs)
- */
-function parseMarkdownBlocks(rawText) {
-  const lines = rawText.split('\n');
+  const lines = text.split('\n');
   const blocks = [];
+
   let currentTable = null;
   let currentList = null;
   let currentFlowchart = [];
@@ -488,15 +569,16 @@ function parseMarkdownBlocks(rawText) {
   lines.forEach((line) => {
     const trimmed = line.trim();
 
-    // Check if line belongs to a flowchart block
     const isFlowLine =
       trimmed === '↓' ||
+      trimmed === '|' ||
       trimmed === 'v' ||
+      trimmed === '↓↓' ||
       trimmed.includes('↙') ||
       trimmed.includes('↘') ||
       trimmed.includes('├──') ||
       trimmed.includes('└──') ||
-      (trimmed.startsWith('[') && trimmed.includes(']'));
+      /^\[[^\]]+\]/.test(trimmed);
 
     if (isFlowLine) {
       if (currentTable) {
@@ -521,11 +603,10 @@ function parseMarkdownBlocks(rawText) {
       currentFlowchart = [];
     }
 
-    // Check if table row: starts with '|' or contains multiple '|' pipes
     const pipeCount = (trimmed.match(/\|/g) || []).length;
     if (trimmed.startsWith('|') || pipeCount >= 2) {
       if (/^\|?[\s\:\-\|]+\|?$/.test(trimmed)) {
-        return; // Ignore table divider line |---|---|
+        return;
       }
 
       const rawCells = trimmed.split('|');
@@ -546,13 +627,12 @@ function parseMarkdownBlocks(rawText) {
         return;
       }
     }
-    
+
     if (currentTable) {
       blocks.push(currentTable);
       currentTable = null;
     }
 
-    // Check for Blockquote: '> text'
     if (trimmed.startsWith('>')) {
       const quoteText = trimmed.replace(/^>\s*/, '');
       blocks.push({
@@ -562,7 +642,6 @@ function parseMarkdownBlocks(rawText) {
       return;
     }
 
-    // Check for Numbered List item: '1. item'
     const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
     if (numMatch) {
       if (!currentList || currentList.listType !== 'numbered') {
@@ -578,7 +657,6 @@ function parseMarkdownBlocks(rawText) {
       return;
     }
 
-    // Check for Bullet List item: '- item' or '* item'
     if (/^[\-\*]\s+/.test(trimmed)) {
       const itemText = trimmed.replace(/^[\-\*]\s+/, '');
       if (!currentList || currentList.listType === 'numbered') {
@@ -599,7 +677,6 @@ function parseMarkdownBlocks(rawText) {
 
     if (!trimmed) return;
 
-    // Check for Heading: '#', '##', '###'
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       blocks.push({
@@ -610,7 +687,6 @@ function parseMarkdownBlocks(rawText) {
       return;
     }
 
-    // Paragraph
     blocks.push({
       type: 'paragraph',
       text: trimmed,
@@ -629,51 +705,41 @@ function parseMarkdownBlocks(rawText) {
   return blocks;
 }
 
-/**
- * Cleans and converts LaTeX chemical and mathematical expressions into human-readable text
- * e.g. $\text{Na}^+/\text{K}^+$ -> Na⁺/K⁺
- */
 function cleanLatexFormulas(rawStr) {
   if (!rawStr) return '';
   let text = String(rawStr);
 
-  // 1. Direct replacement for common chemical pumps / ions
   text = text.replace(/\$\\text\{Na\}\^\+\/\\text\{K\}\^\+\$/g, 'Na⁺/K⁺');
   text = text.replace(/\\text\{Na\}\^\+\/\\text\{K\}\^\+/g, 'Na⁺/K⁺');
   text = text.replace(/\$\\text\{Ca\}\^\{2\+\}\$/g, 'Ca²⁺');
 
-  // 2. Remove math mode wrappers: $ ... $ or \( ... \)
-  text = text.replace(/\$([^\$]+)\$/g, '$1');
-  text = text.replace(/\\\(([^\)]+)\\\)/g, '$1');
+  text = text.replace(/\$([^$]+)\$/g, '$1');
+  text = text.replace(/\\\((.*?)\\\)/g, '$1');
 
-  // 3. Remove \text{...} wrappers
   text = text.replace(/\\text\{([^}]+)\}/g, '$1');
 
-  // 4. Superscripts & Ion Charges:
   text = text.replace(/\^\{2\+\}/g, '²⁺');
   text = text.replace(/\^\{3\+\}/g, '³⁺');
   text = text.replace(/\^\{2\-\}/g, '²⁻');
   text = text.replace(/\^\+/g, '⁺');
   text = text.replace(/\^-/g, '⁻');
 
-  // 5. Subscripts:
   text = text.replace(/_2/g, '₂');
   text = text.replace(/_3/g, '₃');
   text = text.replace(/_4/g, '₄');
   text = text.replace(/_12/g, '₁₂');
 
-  // 6. Clean up remaining raw LaTeX backslashes
   text = text.replace(/\\/g, '');
 
   return text;
 }
 
-function renderFormattedInlineText(text) {
+function renderFormattedInlineText(text, theme = 'dark') {
   if (!text) return '';
   const sanitized = cleanLatexFormulas(text);
   const cleanText = String(sanitized).replace(/<br\s*\/?>/gi, '\n');
+  const isLight = theme === 'light';
 
-  // Split by bold (**bold**) and inline code (`code`)
   const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
   const parts = cleanText.split(regex);
 
@@ -688,7 +754,7 @@ function renderFormattedInlineText(text) {
           key={idx}
           style={{
             fontWeight: '700',
-            color: isKeyLabel ? '#c084fc' : '#f8fafc',
+            color: isKeyLabel ? (isLight ? '#7c3aed' : '#c084fc') : (isLight ? '#0f172a' : '#f8fafc'),
           }}
         >
           {cleanLatexFormulas(boldContent)}
@@ -701,15 +767,15 @@ function renderFormattedInlineText(text) {
         <Text
           key={idx}
           style={{
-            backgroundColor: '#0f172a',
-            color: '#38bdf8',
+            backgroundColor: isLight ? '#f1f5f9' : '#0f172a',
+            color: isLight ? '#0284c7' : '#38bdf8',
             fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
             fontSize: 12,
             paddingHorizontal: 4,
             paddingVertical: 1,
             borderRadius: 4,
             borderWidth: 1,
-            borderColor: '#334155',
+            borderColor: isLight ? '#cbd5e1' : '#334155',
           }}
         >
           {part.slice(1, -1)}
@@ -717,30 +783,30 @@ function renderFormattedInlineText(text) {
       );
     }
 
-    // Check for inline Key: Value pattern e.g. "Diagnosis: Acute Epiglottitis"
     const kvMatch = part.match(/^([A-Z][A-Za-z0-9\s-]{1,25}:)(\s+.*)$/);
     if (kvMatch) {
       return (
         <Text key={idx}>
-          <Text style={{ fontWeight: '700', color: '#c084fc' }}>{kvMatch[1]}</Text>
-          <Text style={{ color: '#cbd5e1' }}>{cleanLatexFormulas(kvMatch[2])}</Text>
+          <Text style={{ fontWeight: '700', color: isLight ? '#7c3aed' : '#c084fc' }}>{kvMatch[1]}</Text>
+          <Text style={{ color: isLight ? '#1e293b' : '#cbd5e1' }}>{cleanLatexFormulas(kvMatch[2])}</Text>
         </Text>
       );
     }
 
-    return <Text key={idx}>{part}</Text>;
+    return <Text key={idx} style={{ color: isLight ? '#1e293b' : '#cbd5e1' }}>{part}</Text>;
   });
 }
 
-function headingStyle(level) {
+function headingStyle(level, theme = 'dark') {
+  const isLight = theme === 'light';
   switch (level) {
     case 1:
-      return { fontSize: 17, color: '#c084fc', marginTop: 12, marginBottom: 8, fontWeight: '800' };
+      return { fontSize: 17, color: isLight ? '#6d28d9' : '#c084fc', marginTop: 12, marginBottom: 8, fontWeight: '800' };
     case 2:
-      return { fontSize: 15, color: '#818cf8', marginTop: 10, marginBottom: 6, fontWeight: '700' };
+      return { fontSize: 15, color: isLight ? '#4338ca' : '#818cf8', marginTop: 10, marginBottom: 6, fontWeight: '700' };
     case 3:
     default:
-      return { fontSize: 13.5, color: '#a7f3d0', marginTop: 8, marginBottom: 4, fontWeight: '700' };
+      return { fontSize: 13.5, color: isLight ? '#047857' : '#a7f3d0', marginTop: 8, marginBottom: 4, fontWeight: '700' };
   }
 }
 
@@ -761,7 +827,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 
-  // Badge Header
   badgeHeader: {
     backgroundColor: 'rgba(99, 102, 241, 0.15)',
     borderRadius: 6,
@@ -779,7 +844,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Flowchart & Decision Tree UI Components
   flowchartContainer: {
     backgroundColor: '#0f172a',
     borderRadius: 14,
@@ -799,6 +863,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     marginVertical: 4,
     borderWidth: 1.5,
     borderColor: '#818cf8',
@@ -872,7 +937,6 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
 
-  // Synchronized Table Grid Layout
   tableWrapper: {
     marginVertical: 10,
   },
@@ -978,7 +1042,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 
-  // Zoom Modal Styles
   zoomModalContainer: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -1064,7 +1127,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
 
-  // Blockquote Styling
   blockquoteContainer: {
     backgroundColor: 'rgba(168, 85, 247, 0.1)',
     borderLeftWidth: 3.5,
@@ -1082,7 +1144,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 
-  // List Styling
   listContainer: {
     marginVertical: 4,
     width: '100%',

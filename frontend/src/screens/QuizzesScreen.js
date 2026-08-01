@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -6,13 +6,27 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Alert,
   RefreshControl,
   TextInput,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BookOpen, Search, X, Edit3, Play, Trash2, Layers, Plus, Filter, SlidersHorizontal } from 'lucide-react-native';
+import {
+  BookOpen,
+  Search,
+  X,
+  Edit3,
+  Play,
+  Trash2,
+  Layers,
+  Plus,
+  SlidersHorizontal,
+  Shield,
+  UserCheck,
+} from 'lucide-react-native';
 import { fetchQuizzes, deleteQuiz } from '../services/api';
 import ManageQuizModal from '../components/ManageQuizModal';
 import TestConfigModal from '../components/TestConfigModal';
@@ -23,8 +37,13 @@ export default function QuizzesScreen({ navigation }) {
   const [quizzes, setQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Quiz Category Switcher: 'standard' (Admin) vs 'custom' (User)
+  const [quizCategory, setQuizCategory] = useState('standard');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('All');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  const searchInputRef = useRef(null);
 
   // Modal states
   const [manageModalVisible, setManageModalVisible] = useState(false);
@@ -43,6 +62,8 @@ export default function QuizzesScreen({ navigation }) {
       const data = await fetchQuizzes();
       if (data && data.quizzes) {
         setQuizzes(data.quizzes);
+      } else {
+        setQuizzes([]);
       }
     } catch (err) {
       console.warn('Error loading quizzes:', err.message);
@@ -81,8 +102,8 @@ export default function QuizzesScreen({ navigation }) {
               Alert.alert('Delete Error', err.message || 'Failed to delete quiz.');
               setLoading(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -105,25 +126,37 @@ export default function QuizzesScreen({ navigation }) {
     setConfigModalVisible(true);
   };
 
-  // Get unique subjects for filter chips
-  const subjects = ['All', ...Array.from(new Set(quizzes.map((q) => q.subject || 'General')))];
+  const isCustomQuiz = (q) => {
+    if (q.isCustom === true) return true;
+    if (q.creator === 'user') return true;
+    const titleLower = (q.title || '').toLowerCase();
+    if (titleLower.includes('custom') || titleLower.includes('combined')) return true;
+    return false;
+  };
 
-  const filteredQuizzes = quizzes.filter((q) => {
+  // Separate Standard (Admin) vs Custom (User) Quizzes
+  const standardQuizzes = quizzes.filter((q) => !isCustomQuiz(q));
+  const customQuizzes = quizzes.filter((q) => isCustomQuiz(q));
+
+  const currentCategoryQuizzes = quizCategory === 'standard' ? standardQuizzes : customQuizzes;
+
+  // Filter quizzes by search query (Shows ALL when search is blank)
+  const filteredQuizzes = currentCategoryQuizzes.filter((q) => {
+    if (!searchQuery || !searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase().trim();
-    const matchesQuery =
-      !query ||
+    return (
       (q.title && q.title.toLowerCase().includes(query)) ||
       (q.subject && q.subject.toLowerCase().includes(query)) ||
-      (q.description && q.description.toLowerCase().includes(query));
-
-    const matchesSubject = selectedSubject === 'All' || (q.subject || 'General') === selectedSubject;
-
-    return matchesQuery && matchesSubject;
+      (q.description && q.description.toLowerCase().includes(query)) ||
+      (Array.isArray(q.topics) && q.topics.some((t) => t && t.toLowerCase().includes(query)))
+    );
   });
 
   const handleTabPress = (tabName) => {
     if (tabName === 'Home') {
       navigation.navigate('Home');
+    } else if (tabName === 'Study') {
+      navigation.navigate('Study');
     } else if (tabName === 'History') {
       navigation.navigate('History');
     } else if (tabName === 'Profile') {
@@ -133,57 +166,118 @@ export default function QuizzesScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      
       {/* Header Bar */}
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Quiz Directory</Text>
-          <Text style={styles.headerSubtitle}>{quizzes.length} Quizzes Available</Text>
+          <Text style={styles.headerSubtitle}>
+            {quizCategory === 'standard'
+              ? `${standardQuizzes.length} Admin Quizzes (Public)`
+              : `${customQuizzes.length} Custom Quizzes (My Created Tests)`}
+          </Text>
         </View>
+
         <TouchableOpacity
           style={styles.buildCustomHeaderBtn}
           onPress={() => setCustomBuilderVisible(true)}
+          activeOpacity={0.8}
         >
-          <SlidersHorizontal size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-          <Text style={styles.buildCustomHeaderText}>Build Custom Test</Text>
+          <Plus size={14} color="#FFFFFF" style={{ marginRight: 3 }} />
+          <Text style={styles.buildCustomHeaderText}>Build Custom Quiz</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Search size={14} color="#94a3b8" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search quizzes by title or subject..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholderTextColor="#64748b"
-        />
-        {searchQuery ? (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <X size={14} color="#94a3b8" />
-          </TouchableOpacity>
-        ) : null}
+      {/* Top Dual Section Switcher: Standard Quizzes (Admin) vs Custom Quizzes (User) */}
+      <View style={styles.sectionSwitcherContainer}>
+        <TouchableOpacity
+          style={[
+            styles.sectionBtn,
+            quizCategory === 'standard' && styles.sectionBtnActive,
+          ]}
+          onPress={() => setQuizCategory('standard')}
+          activeOpacity={0.8}
+        >
+          <Shield
+            size={15}
+            color={quizCategory === 'standard' ? '#ffffff' : '#94a3b8'}
+          />
+          <Text
+            style={[
+              styles.sectionBtnText,
+              quizCategory === 'standard' && styles.sectionBtnTextActive,
+            ]}
+          >
+            Standard ({standardQuizzes.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.sectionBtn,
+            quizCategory === 'custom' && styles.sectionBtnActiveCustom,
+          ]}
+          onPress={() => setQuizCategory('custom')}
+          activeOpacity={0.8}
+        >
+          <UserCheck
+            size={15}
+            color={quizCategory === 'custom' ? '#ffffff' : '#94a3b8'}
+          />
+          <Text
+            style={[
+              styles.sectionBtnText,
+              quizCategory === 'custom' && styles.sectionBtnTextActive,
+            ]}
+          >
+            Custom Quizzes ({customQuizzes.length})
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Subject Filter Chips */}
-      <View style={styles.filterChipContainer}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={subjects}
-          keyExtractor={(item) => item}
-          contentContainerStyle={{ paddingHorizontal: 10, gap: 4 }}
-          renderItem={({ item }) => (
+      {/* Sleek Modern Floating Search Capsule */}
+      <View style={styles.searchFilterRow}>
+        <Pressable
+          style={[
+            styles.modernSearchBox,
+            isSearchFocused && styles.modernSearchBoxFocused,
+          ]}
+          onPress={() => searchInputRef.current?.focus()}
+        >
+          <View style={styles.searchIconBox} pointerEvents="none">
+            <Search size={14} color={isSearchFocused ? '#c084fc' : '#818cf8'} />
+          </View>
+
+          <TextInput
+            ref={searchInputRef}
+            style={styles.modernSearchInput}
+            placeholder={
+              quizCategory === 'standard'
+                ? 'Type any keyword, title or topic...'
+                : 'Search custom user quizzes...'
+            }
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            placeholderTextColor="#64748b"
+            editable={true}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          {searchQuery ? (
             <TouchableOpacity
-              style={[styles.chip, selectedSubject === item && styles.selectedChip]}
-              onPress={() => setSelectedSubject(item)}
+              style={styles.clearSearchBtn}
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Text style={[styles.chipText, selectedSubject === item && styles.selectedChipText]}>
-                {item}
-              </Text>
+              <X size={14} color="#94a3b8" />
             </TouchableOpacity>
-          )}
-        />
+          ) : null}
+        </Pressable>
       </View>
 
       {/* Quiz List */}
@@ -194,28 +288,90 @@ export default function QuizzesScreen({ navigation }) {
         </View>
       ) : filteredQuizzes.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <BookOpen size={48} color="#475569" />
-          <Text style={styles.emptyTitle}>No Quizzes Found</Text>
-          <Text style={styles.emptySubtitle}>
-            Try adjusting your search query or filter chips.
-          </Text>
+          {quizCategory === 'custom' ? (
+            <>
+              <SlidersHorizontal size={44} color="#a855f7" />
+              <Text style={styles.emptyTitle}>
+                {searchQuery ? 'No Matching Custom Quizzes' : 'No Custom Quizzes Created Yet'}
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {searchQuery
+                  ? 'Try a different search term.'
+                  : 'Create your own personalized custom tests from specific topics or custom question banks!'}
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyCreateBtn}
+                onPress={() => setCustomBuilderVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Plus size={15} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.emptyCreateBtnText}>Create Custom Quiz Now</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <BookOpen size={44} color="#475569" />
+              <Text style={styles.emptyTitle}>No Admin Quizzes Found</Text>
+              <Text style={styles.emptySubtitle}>
+                No quizzes match "{searchQuery}". Try a different keyword.
+              </Text>
+            </>
+          )}
         </View>
       ) : (
         <FlatList
           data={filteredQuizzes}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listPadding}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={40}
+          removeClippedSubviews={true}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#6366f1']} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#6366f1']}
+            />
           }
           renderItem={({ item }) => {
             const qCount = item.questions?.length || item.questionCount || 0;
+            const isCustomItem = isCustomQuiz(item);
+
             return (
               <View style={styles.quizCard}>
                 <View style={styles.quizCardHeader}>
-                  <View style={styles.subjectBadge}>
-                    <Text style={styles.subjectBadgeText}>{item.subject || 'General'}</Text>
+                  <View style={styles.headerBadgesRow}>
+                    <View
+                      style={[
+                        styles.categoryBadge,
+                        isCustomItem
+                          ? { backgroundColor: 'rgba(168, 85, 247, 0.2)', borderColor: '#a855f7' }
+                          : { backgroundColor: 'rgba(99, 102, 241, 0.2)', borderColor: '#6366f1' },
+                      ]}
+                    >
+                      {isCustomItem ? (
+                        <UserCheck size={11} color="#c084fc" style={{ marginRight: 4 }} />
+                      ) : (
+                        <Shield size={11} color="#818cf8" style={{ marginRight: 4 }} />
+                      )}
+                      <Text
+                        style={[
+                          styles.categoryBadgeText,
+                          isCustomItem ? { color: '#c084fc' } : { color: '#818cf8' },
+                        ]}
+                      >
+                        {isCustomItem ? 'CUSTOM QUIZ' : 'ADMIN QUIZ'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.subjectBadge}>
+                      <Text style={styles.subjectBadgeText}>{item.subject || 'General'}</Text>
+                    </View>
                   </View>
+
                   <Text style={styles.dateText}>
                     {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}
                   </Text>
@@ -231,7 +387,9 @@ export default function QuizzesScreen({ navigation }) {
                 <View style={styles.quizMetaRow}>
                   <View style={styles.metaItem}>
                     <Layers size={14} color="#818cf8" />
-                    <Text style={styles.metaText}>{qCount} {qCount === 1 ? 'Question' : 'Questions'}</Text>
+                    <Text style={styles.metaText}>
+                      {qCount} {qCount === 1 ? 'Question' : 'Questions'}
+                    </Text>
                   </View>
                 </View>
 
@@ -241,7 +399,7 @@ export default function QuizzesScreen({ navigation }) {
                     style={styles.manageBtn}
                     onPress={() => handleOpenManageQuestions(item)}
                   >
-                    <Edit3 size={15} color="#818cf8" />
+                    <Edit3 size={14} color="#818cf8" />
                     <Text style={styles.manageBtnText}>Manage</Text>
                   </TouchableOpacity>
 
@@ -249,16 +407,18 @@ export default function QuizzesScreen({ navigation }) {
                     style={[styles.testBtn, qCount === 0 && styles.disabledTestBtn]}
                     onPress={() => handleOpenStartTest(item)}
                   >
-                    <Play size={15} color="#ffffff" />
+                    <Play size={14} color="#ffffff" />
                     <Text style={styles.testBtnText}>Start Test</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.deleteBtn}
-                    onPress={() => handleDeleteQuiz(item._id, item.title)}
-                  >
-                    <Trash2 size={16} color="#ef4444" />
-                  </TouchableOpacity>
+                  {isCustomItem ? (
+                    <TouchableOpacity
+                      style={styles.deleteBtn}
+                      onPress={() => handleDeleteQuiz(item._id, item.title)}
+                    >
+                      <Trash2 size={15} color="#ef4444" />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
             );
@@ -267,13 +427,7 @@ export default function QuizzesScreen({ navigation }) {
       )}
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar
-        activeTab="Quizzes"
-        onTabPress={handleTabPress}
-        onAddQuizPress={() => {
-          navigation.navigate('Home', { openCreateModal: true });
-        }}
-      />
+      <BottomTabBar activeTab="Quizzes" onTabPress={handleTabPress} />
 
       {/* Manage Questions Modal */}
       <ManageQuizModal
@@ -301,18 +455,15 @@ export default function QuizzesScreen({ navigation }) {
         }}
       />
 
-      {/* Modal: Custom Multi-Source Quiz Builder */}
+      {/* Custom Quiz Builder Modal */}
       <CustomQuizBuilderModal
         visible={customBuilderVisible}
+        quizzes={quizzes}
         onClose={() => setCustomBuilderVisible(false)}
-        onStartTest={(generatedQuiz, config) => {
+        onQuizCreated={(newQuiz, targetCategory) => {
           setCustomBuilderVisible(false);
+          setQuizCategory(targetCategory || 'custom');
           loadQuizzes();
-          navigation.navigate('Test', {
-            quiz: generatedQuiz,
-            questions: generatedQuiz.questions,
-            configOptions: config,
-          });
         }}
       />
     </SafeAreaView>
@@ -328,25 +479,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
     backgroundColor: '#1e293b',
     borderBottomWidth: 1,
     borderBottomColor: '#334155',
-  },
-  buildCustomHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#6366f1',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
-  },
-  buildCustomHeaderText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
   },
   headerTitle: {
     fontSize: 20,
@@ -354,98 +492,159 @@ const styles = StyleSheet.create({
     color: '#f8fafc',
   },
   headerSubtitle: {
-    fontSize: 11,
+    fontSize: 11.5,
     color: '#94a3b8',
     marginTop: 1,
   },
-  searchContainer: {
+  buildCustomHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#a855f7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  buildCustomHeaderText: {
+    color: '#FFFFFF',
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  sectionSwitcherContainer: {
+    flexDirection: 'row',
     backgroundColor: '#1e293b',
     marginHorizontal: 10,
-    marginTop: 6,
-    marginBottom: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
+    marginTop: 8,
+    padding: 3,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#334155',
   },
-  searchIcon: {
-    marginRight: 6,
-  },
-  searchInput: {
+  sectionBtn: {
     flex: 1,
-    fontSize: 12.5,
-    color: '#f8fafc',
-    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: 7,
   },
-  filterChipContainer: {
-    marginVertical: 4,
-  },
-  chip: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  selectedChip: {
+  sectionBtnActive: {
     backgroundColor: '#6366f1',
-    borderColor: '#818cf8',
   },
-  chipText: {
-    fontSize: 11.5,
-    color: '#94a3b8',
+  sectionBtnActiveCustom: {
+    backgroundColor: '#a855f7',
+  },
+  sectionBtnText: {
+    fontSize: 12,
     fontWeight: '600',
+    color: '#94a3b8',
+    marginLeft: 5,
   },
-  selectedChipText: {
+  sectionBtnTextActive: {
     color: '#ffffff',
     fontWeight: '700',
   },
+
+  // Ultra-Modern Floating Search Box
+  searchFilterRow: {
+    paddingHorizontal: 10,
+    marginVertical: 8,
+  },
+  modernSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    height: 42,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+  },
+  modernSearchBoxFocused: {
+    borderColor: '#a855f7',
+    backgroundColor: '#0f172a',
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  searchIconBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  modernSearchInput: {
+    flex: 1,
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: '600',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    height: '100%',
+  },
+  clearSearchBtn: {
+    padding: 6,
+  },
+
   centerContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
   },
   loadingText: {
-    marginTop: 8,
+    marginTop: 10,
     color: '#94a3b8',
     fontSize: 13,
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    justifyContent: 'center',
+    paddingHorizontal: 30,
   },
   emptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#cbd5e1',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#f8fafc',
     marginTop: 12,
   },
   emptySubtitle: {
-    fontSize: 13,
-    color: '#64748b',
+    fontSize: 12,
+    color: '#94a3b8',
     textAlign: 'center',
     marginTop: 4,
-    lineHeight: 18,
+    lineHeight: 17,
+  },
+  emptyCreateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#a855f7',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 8,
+    marginTop: 14,
+  },
+  emptyCreateBtnText: {
+    color: '#ffffff',
+    fontSize: 12.5,
+    fontWeight: '700',
   },
   listPadding: {
     paddingHorizontal: 10,
-    paddingTop: 6,
     paddingBottom: 30,
+    gap: 10,
   },
   quizCard: {
     backgroundColor: '#1e293b',
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#334155',
-    elevation: 2,
   },
   quizCardHeader: {
     flexDirection: 'row',
@@ -453,34 +652,49 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  subjectBadge: {
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 10,
+  headerBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
     borderWidth: 1,
-    borderColor: '#6366f1',
+  },
+  categoryBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  subjectBadge: {
+    backgroundColor: 'rgba(51, 65, 85, 0.6)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
   },
   subjectBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#818cf8',
+    color: '#cbd5e1',
+    fontSize: 10.5,
+    fontWeight: '600',
   },
   dateText: {
-    fontSize: 11,
-    color: '#94a3b8',
+    color: '#64748b',
+    fontSize: 10.5,
   },
   quizTitle: {
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: '700',
     color: '#f8fafc',
     marginBottom: 3,
   },
   quizDesc: {
     fontSize: 12,
-    color: '#cbd5e1',
-    lineHeight: 16,
-    marginBottom: 10,
+    color: '#94a3b8',
+    lineHeight: 17,
+    marginBottom: 8,
   },
   quizMetaRow: {
     flexDirection: 'row',
@@ -492,56 +706,62 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   metaText: {
-    fontSize: 12,
-    fontWeight: '600',
     color: '#cbd5e1',
-    marginLeft: 5,
+    fontSize: 11.5,
+    marginLeft: 4,
+    fontWeight: '600',
   },
   cardBtnRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     borderTopWidth: 1,
     borderTopColor: '#334155',
-    paddingTop: 10,
+    paddingTop: 8,
   },
   manageBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginRight: 6,
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+    paddingVertical: 7,
+    borderRadius: 7,
     borderWidth: 1,
-    borderColor: '#6366f1',
+    borderColor: '#334155',
   },
   manageBtnText: {
     color: '#818cf8',
+    fontSize: 11.5,
     fontWeight: '700',
-    fontSize: 12,
     marginLeft: 4,
   },
   testBtn: {
+    flex: 1.2,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#10b981',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    flex: 1,
     justifyContent: 'center',
+    backgroundColor: '#6366f1',
+    paddingVertical: 7,
+    borderRadius: 7,
   },
   disabledTestBtn: {
-    backgroundColor: '#475569',
+    opacity: 0.5,
   },
   testBtnText: {
     color: '#ffffff',
+    fontSize: 11.5,
     fontWeight: '700',
-    fontSize: 12,
     marginLeft: 4,
   },
   deleteBtn: {
-    padding: 6,
-    marginLeft: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 7,
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
   },
 });

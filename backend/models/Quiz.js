@@ -17,6 +17,9 @@ const QuizSchema = new mongoose.Schema({
   description: { type: String, default: '', trim: true },
   questionCount: { type: Number, default: 0 },
   questions: [QuestionSchema],
+  isCustom: { type: Boolean, default: false },
+  creator: { type: String, default: 'admin' },
+  userId: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

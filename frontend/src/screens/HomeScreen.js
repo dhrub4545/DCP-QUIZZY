@@ -147,6 +147,8 @@ export default function HomeScreen({ navigation, route }) {
     setActiveTab(tabName);
     if (tabName === 'Quizzes') {
       navigation.navigate('Quizzes');
+    } else if (tabName === 'Study') {
+      navigation.navigate('Study');
     } else if (tabName === 'History') {
       navigation.navigate('History');
     } else if (tabName === 'Profile') {
@@ -379,7 +381,6 @@ export default function HomeScreen({ navigation, route }) {
       <BottomTabBar
         activeTab={activeTab}
         onTabPress={handleTabPress}
-        onAddQuizPress={() => setCreateModalVisible(true)}
       />
 
       {/* Modal: Create New Quiz */}

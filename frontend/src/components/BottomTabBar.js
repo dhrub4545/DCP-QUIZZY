@@ -1,18 +1,26 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Home, BookOpen, Plus, Clock, User } from 'lucide-react-native';
+import { Home, BookOpen, Clock, User, GraduationCap } from 'lucide-react-native';
 
 /**
  * BottomTabBar component
- * Fixed bottom navigation bar featuring Home, Quizzes, Add Quiz (+), History, and Profile tabs.
+ * Fixed bottom navigation bar featuring Home, Quizzes, Study, History, and Profile tabs.
  */
-export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) {
+export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
+  const handleStudyPress = () => {
+    if (onStudyPress) {
+      onStudyPress();
+    } else if (onTabPress) {
+      onTabPress('Study');
+    }
+  };
+
   return (
     <View style={styles.footerContainer}>
       {/* Home Tab */}
       <TouchableOpacity
         style={styles.tabItem}
-        onPress={() => onTabPress('Home')}
+        onPress={() => onTabPress && onTabPress('Home')}
         activeOpacity={0.7}
       >
         <Home
@@ -27,7 +35,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
       {/* Quizzes Tab */}
       <TouchableOpacity
         style={styles.tabItem}
-        onPress={() => onTabPress('Quizzes')}
+        onPress={() => onTabPress && onTabPress('Quizzes')}
         activeOpacity={0.7}
       >
         <BookOpen
@@ -39,22 +47,24 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
         </Text>
       </TouchableOpacity>
 
-      {/* Add Quiz Floating Tab Button */}
+      {/* Study Floating Tab Button */}
       <TouchableOpacity
         style={styles.addTabItem}
-        onPress={onAddQuizPress}
+        onPress={handleStudyPress}
         activeOpacity={0.8}
       >
-        <View style={styles.addBtnCircle}>
-          <Plus size={22} color="#ffffff" />
+        <View style={[styles.addBtnCircle, activeTab === 'Study' && styles.activeAddBtnCircle]}>
+          <GraduationCap size={23} color="#ffffff" />
         </View>
-        <Text style={styles.addTabLabel}>Add Quiz</Text>
+        <Text style={[styles.addTabLabel, activeTab === 'Study' && styles.activeAddTabLabel]}>
+          Study
+        </Text>
       </TouchableOpacity>
 
       {/* History Tab */}
       <TouchableOpacity
         style={styles.tabItem}
-        onPress={() => onTabPress('History')}
+        onPress={() => onTabPress && onTabPress('History')}
         activeOpacity={0.7}
       >
         <Clock
@@ -69,7 +79,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onAddQuizPress }) 
       {/* Profile Tab */}
       <TouchableOpacity
         style={styles.tabItem}
-        onPress={() => onTabPress('Profile')}
+        onPress={() => onTabPress && onTabPress('Profile')}
         activeOpacity={0.7}
       >
         <User
@@ -137,10 +147,18 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
+  activeAddBtnCircle: {
+    backgroundColor: '#818cf8',
+    borderColor: '#6366f1',
+  },
   addTabLabel: {
     fontSize: 10.5,
     fontWeight: '700',
     color: '#818cf8',
     marginTop: 2,
+  },
+  activeAddTabLabel: {
+    color: '#a5b4fc',
+    fontWeight: '800',
   },
 });

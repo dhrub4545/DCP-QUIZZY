@@ -12,33 +12,51 @@ import {
   Alert,
 } from 'react-native';
 import {
-  Layers,
-  Plus,
-  Trash2,
-  Play,
-  X,
-  Shuffle,
-  Clock,
-  Save,
-  SlidersHorizontal,
+  BookOpen,
+  Check,
   CheckCircle2,
+  Clock,
+  Layers,
+  Play,
+  Plus,
+  Save,
+  Shuffle,
+  SlidersHorizontal,
+  X,
+  Sparkles,
+  Dice5,
+  Sliders,
+  Shield,
+  UserCheck,
 } from 'lucide-react-native';
 import { fetchQuizSourcesApi, generateCustomQuizApi } from '../services/api';
 
-export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }) {
+export default function CustomQuizBuilderModal({ visible, onClose, onStartTest, onQuizCreated }) {
   const [loadingSources, setLoadingSources] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [availableSources, setAvailableSources] = useState([]);
 
-  // Form State
-  const [quizTitle, setQuizTitle] = useState('Custom Combined Mock Test');
-  const [quizSubject, setQuizSubject] = useState('Custom Mix');
-  const [saveAsQuiz, setSaveAsQuiz] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(30);
-  const [shuffleOptions, setShuffleOptions] = useState(false);
+  // Selected Quiz/Book IDs
+  const [selectedSourceIds, setSelectedSourceIds] = useState([]);
 
-  // Array of source allocations: [{ id: string (unique key), quizId: string, count: string }]
-  const [allocations, setAllocations] = useState([]);
+  // Distribution Mode: 'random' vs 'custom_counts'
+  const [distributionMode, setDistributionMode] = useState('random');
+
+  // Destination Directory: 'custom' (My Custom Quizzes) vs 'standard' (Standard Quizzes)
+  const [destinationCategory, setDestinationCategory] = useState('custom');
+
+  // Custom Per-Book Allocation state: { [sourceId]: string }
+  const [customBookCounts, setCustomBookCounts] = useState({});
+
+  // Global Question Count Preset (used when distributionMode === 'random')
+  const [targetCountPreset, setTargetCountPreset] = useState(50);
+
+  // Form Customization State
+  const [quizTitle, setQuizTitle] = useState('');
+  const [saveAsQuiz, setSaveAsQuiz] = useState(true);
+  const [timerSeconds, setTimerSeconds] = useState(30);
+  const [shuffleQuestions, setShuffleQuestions] = useState(true);
+  const [shuffleOptions, setShuffleOptions] = useState(true);
 
   const loadSources = async () => {
     try {
@@ -46,23 +64,16 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
       const res = await fetchQuizSourcesApi();
       if (res && res.sources) {
         setAvailableSources(res.sources);
+        // By default, select all available sources
+        if (res.sources.length > 0) {
+          setSelectedSourceIds(res.sources.map((s) => s._id));
 
-        // Pre-populate sensible defaults if available (e.g. Medicine & Pediatrics)
-        if (allocations.length === 0 && res.sources.length > 0) {
-          const medSource = res.sources.find((s) => s.subject === 'Medicine') || res.sources[0];
-          const pedSource = res.sources.find((s) => s.subject === 'Pediatrics') || (res.sources[1] || res.sources[0]);
-
-          const initial = [];
-          if (medSource) {
-            initial.push({ id: 'alloc-1', quizId: medSource._id, count: '100' });
-          }
-          if (pedSource && pedSource._id !== medSource?._id) {
-            initial.push({ id: 'alloc-2', quizId: pedSource._id, count: '100' });
-          }
-
-          if (initial.length > 0) {
-            setAllocations(initial);
-          }
+          // Initialize custom per-book counts default to 25 each
+          const initialCounts = {};
+          res.sources.forEach((s) => {
+            initialCounts[s._id] = '25';
+          });
+          setCustomBookCounts(initialCounts);
         }
       }
     } catch (err) {
@@ -78,43 +89,74 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
     }
   }, [visible]);
 
-  const handleAddSource = () => {
-    if (availableSources.length === 0) {
-      Alert.alert('No Sources', 'No question banks found in database.');
-      return;
+  const toggleSourceSelection = (id) => {
+    if (selectedSourceIds.includes(id)) {
+      if (selectedSourceIds.length === 1) {
+        Alert.alert('Required Selection', 'You must select at least one question book/topic.');
+        return;
+      }
+      setSelectedSourceIds(selectedSourceIds.filter((item) => item !== id));
+    } else {
+      setSelectedSourceIds([...selectedSourceIds, id]);
     }
-    // Default to first available source
-    const newId = 'alloc-' + Date.now();
-    setAllocations([
-      ...allocations,
-      { id: newId, quizId: availableSources[0]._id, count: '50' },
-    ]);
   };
 
-  const handleRemoveSource = (id) => {
-    if (allocations.length <= 1) {
-      Alert.alert('Minimum Source', 'You must have at least one question source.');
-      return;
+  const handleSelectAll = () => {
+    setSelectedSourceIds(availableSources.map((s) => s._id));
+  };
+
+  const handleDeselectAll = () => {
+    if (availableSources.length > 0) {
+      setSelectedSourceIds([availableSources[0]._id]);
     }
-    setAllocations(allocations.filter((item) => item.id !== id));
   };
 
-  const handleUpdateSource = (id, field, value) => {
-    setAllocations(
-      allocations.map((item) => {
-        if (item.id === id) {
-          return { ...item, [field]: value };
-        }
-        return item;
-      })
-    );
+  const handleBookCountChange = (id, text) => {
+    const cleaned = text.replace(/[^0-9]/g, '');
+    setCustomBookCounts({ ...customBookCounts, [id]: cleaned });
   };
 
-  // Calculate live total questions count
-  const totalQuestionsRequested = allocations.reduce((sum, item) => {
-    const val = parseInt(item.count, 10);
-    return sum + (isNaN(val) || val < 0 ? 0 : val);
-  }, 0);
+  // Calculate total available questions across selected books
+  const totalAvailableInSelected = availableSources
+    .filter((s) => selectedSourceIds.includes(s._id))
+    .reduce((sum, s) => sum + (s.questionCount || 0), 0);
+
+  // Compute final question target count
+  let calculatedTotalQ = 50;
+
+  if (distributionMode === 'custom_counts') {
+    calculatedTotalQ = selectedSourceIds.reduce((sum, id) => {
+      const val = parseInt(customBookCounts[id], 10);
+      return sum + (isNaN(val) || val <= 0 ? 0 : val);
+    }, 0);
+  } else {
+    if (targetCountPreset === 'all') {
+      calculatedTotalQ = totalAvailableInSelected;
+    } else {
+      calculatedTotalQ = Number(targetCountPreset) || 50;
+    }
+  }
+
+  const finalEffectiveCount = Math.min(calculatedTotalQ, totalAvailableInSelected || 1);
+
+  // Auto-generate title if left empty
+  const selectedSourceNames = availableSources
+    .filter((s) => selectedSourceIds.includes(s._id))
+    .map((s) => s.subject || s.title);
+
+  const defaultTitle =
+    selectedSourceNames.length === availableSources.length
+      ? `Grand All-Subject Test (${finalEffectiveCount} Qs)`
+      : `${selectedSourceNames.slice(0, 2).join(' & ')} Practice Test`;
+
+  const countPresets = [
+    { label: '10 Qs', value: 10 },
+    { label: '25 Qs', value: 25 },
+    { label: '50 Qs', value: 50 },
+    { label: '100 Qs', value: 100 },
+    { label: '200 Qs', value: 200 },
+    { label: 'MAX', value: 'all' },
+  ];
 
   const timerChoices = [
     { label: 'Untimed', value: 0 },
@@ -124,45 +166,57 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
   ];
 
   const handleGenerateAndStart = async () => {
-    if (allocations.length === 0) {
-      Alert.alert('Validation Error', 'Please add at least one question source.');
+    if (selectedSourceIds.length === 0) {
+      Alert.alert('Selection Error', 'Please select at least one question book/topic.');
       return;
     }
 
-    const payloadSources = allocations
-      .map((item) => ({
-        quizId: item.quizId,
-        count: parseInt(item.count, 10) || 0,
-      }))
-      .filter((s) => s.quizId && s.count > 0);
+    let payloadSources = [];
 
-    if (payloadSources.length === 0) {
-      Alert.alert('Validation Error', 'Please specify a valid question count (>0) for your sources.');
-      return;
+    if (distributionMode === 'custom_counts') {
+      payloadSources = selectedSourceIds.map((id) => ({
+        quizId: id,
+        count: parseInt(customBookCounts[id], 10) || 10,
+      }));
+    } else {
+      const evenSplit = Math.max(1, Math.ceil(finalEffectiveCount / selectedSourceIds.length));
+      payloadSources = selectedSourceIds.map((id) => ({
+        quizId: id,
+        count: evenSplit,
+      }));
     }
 
     try {
       setSubmitting(true);
 
+      const finalTitle = quizTitle.trim() || defaultTitle;
+
       const res = await generateCustomQuizApi({
-        title: quizTitle.trim() || 'Custom Combined Mock Test',
-        subject: quizSubject.trim() || 'Custom Mix',
-        description: `Custom quiz combining questions from ${payloadSources.length} question banks.`,
+        title: finalTitle,
+        subject: selectedSourceNames.slice(0, 2).join(' & ') || 'Custom Mix',
+        description: `Quiz pulling ${finalEffectiveCount} questions from ${selectedSourceIds.length} books.`,
         sources: payloadSources,
         saveAsQuiz,
+        randomizeDistribution: distributionMode === 'random',
+        targetTotalQuestions: finalEffectiveCount,
+        destinationCategory,
       });
 
       if (res && res.quiz) {
         onClose();
-        onStartTest(res.quiz, {
-          timerSeconds,
-          shuffleOptions,
-        });
+        if (onQuizCreated) onQuizCreated(res.quiz, destinationCategory);
+        if (onStartTest) {
+          onStartTest(res.quiz, {
+            timerSeconds,
+            shuffleQuestions,
+            shuffleOptions,
+          });
+        }
       } else {
-        throw new Error(res?.message || 'Failed to generate custom quiz.');
+        throw new Error(res?.message || 'Failed to generate quiz.');
       }
     } catch (err) {
-      Alert.alert('Generation Error', err.message || 'Server failed to generate custom test.');
+      Alert.alert('Generation Error', err.message || 'Server failed to generate test.');
     } finally {
       setSubmitting(false);
     }
@@ -172,15 +226,15 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
-          {/* Header */}
+          {/* Modal Header */}
           <View style={styles.modalHeader}>
             <View style={styles.headerTitleRow}>
               <View style={styles.iconBadge}>
-                <SlidersHorizontal size={18} color="#818cf8" />
+                <SlidersHorizontal size={18} color="#c084fc" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Multi-Source Quiz Builder</Text>
-                <Text style={styles.modalSubtitle}>Mix questions from different Question Banks</Text>
+                <Text style={styles.modalTitle}>Quiz Generator & Builder</Text>
+                <Text style={styles.modalSubtitle}>Pick topics, destination section & test options</Text>
               </View>
             </View>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
@@ -189,191 +243,320 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
           </View>
 
           <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-            {/* Title & Subject */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionLabel}>Test Metadata</Text>
-              <View style={styles.inputGroup}>
-                <Text style={styles.fieldLabel}>Test Title</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={quizTitle}
-                  onChangeText={setQuizTitle}
-                  placeholder="e.g. Grand Medicine & Pediatrics Test"
-                  placeholderTextColor="#64748b"
+            {/* Distribution Strategy Mode Switcher */}
+            <View style={styles.modeSwitcherContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.modeBtn,
+                  distributionMode === 'random' && styles.modeBtnActive,
+                ]}
+                onPress={() => setDistributionMode('random')}
+                activeOpacity={0.8}
+              >
+                <Dice5
+                  size={14}
+                  color={distributionMode === 'random' ? '#ffffff' : '#94a3b8'}
                 />
-              </View>
+                <Text
+                  style={[
+                    styles.modeBtnText,
+                    distributionMode === 'random' && styles.modeBtnTextActive,
+                  ]}
+                >
+                  Randomized Book Mix
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modeBtn,
+                  distributionMode === 'custom_counts' && styles.modeBtnActive,
+                ]}
+                onPress={() => setDistributionMode('custom_counts')}
+                activeOpacity={0.8}
+              >
+                <Sliders
+                  size={14}
+                  color={distributionMode === 'custom_counts' ? '#ffffff' : '#94a3b8'}
+                />
+                <Text
+                  style={[
+                    styles.modeBtnText,
+                    distributionMode === 'custom_counts' && styles.modeBtnTextActive,
+                  ]}
+                >
+                  Custom Per-Book Count
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Question Sources Allocation */}
+            {/* Step 1: Select Question Books & Topics */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeaderRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Layers size={16} color="#818cf8" style={{ marginRight: 6 }} />
-                  <Text style={styles.sectionLabel} numberOfLines={1}>Source Allocations</Text>
+                  <Text style={styles.sectionLabel}>1. Select Question Books / Topics</Text>
                 </View>
-                <TouchableOpacity style={styles.addSourceBtn} onPress={handleAddSource}>
-                  <Plus size={13} color="#FFFFFF" />
-                  <Text style={styles.addSourceText}>Add Source</Text>
-                </TouchableOpacity>
+                <View style={styles.selectAllRow}>
+                  <TouchableOpacity onPress={handleSelectAll} style={styles.quickSelectBtn}>
+                    <Text style={styles.quickSelectText}>Select All</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#475569', marginHorizontal: 4 }}>|</Text>
+                  <TouchableOpacity onPress={handleDeselectAll} style={styles.quickSelectBtn}>
+                    <Text style={styles.quickSelectText}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {loadingSources ? (
-                <ActivityIndicator size="small" color="#818cf8" style={{ marginVertical: 20 }} />
-              ) : allocations.length === 0 ? (
-                <Text style={styles.emptyText}>No sources added yet. Tap 'Add Source' above.</Text>
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator size="small" color="#a855f7" />
+                  <Text style={styles.loadingText}>Loading question banks...</Text>
+                </View>
+              ) : availableSources.length === 0 ? (
+                <Text style={styles.emptyText}>No question sources found in database.</Text>
               ) : (
-                allocations.map((item, index) => {
-                  const currentSourceObj = availableSources.find((s) => s._id === item.quizId);
-                  const maxAvailable = currentSourceObj?.questionCount || 0;
+                <View style={styles.booksGrid}>
+                  {availableSources.map((source) => {
+                    const isSelected = selectedSourceIds.includes(source._id);
+                    return (
+                      <View
+                        key={source._id}
+                        style={[styles.bookCard, isSelected && styles.bookCardSelected]}
+                      >
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                          onPress={() => toggleSourceSelection(source._id)}
+                          activeOpacity={0.8}
+                        >
+                          <View
+                            style={[
+                              styles.checkbox,
+                              isSelected && styles.checkboxSelected,
+                            ]}
+                          >
+                            {isSelected ? <Check size={12} color="#ffffff" /> : null}
+                          </View>
+                          <View style={{ marginLeft: 10, flex: 1 }}>
+                            <Text style={styles.bookTitle} numberOfLines={1}>
+                              {source.title}
+                            </Text>
+                            <Text style={styles.bookSubject}>
+                              {source.subject || 'General'} • {source.questionCount || 0} Qs available
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
 
-                  return (
-                    <View key={item.id} style={styles.allocationCard}>
-                      <View style={styles.allocCardHeader}>
-                        <Text style={styles.sourceIndexTag}>Source #{index + 1}</Text>
-                        {allocations.length > 1 && (
-                          <TouchableOpacity onPress={() => handleRemoveSource(item.id)}>
-                            <Trash2 size={16} color="#ef4444" />
-                          </TouchableOpacity>
+                        {/* Per-book count input when in custom_counts mode */}
+                        {distributionMode === 'custom_counts' && isSelected ? (
+                          <View style={styles.perBookInputContainer}>
+                            <TextInput
+                              style={styles.perBookInput}
+                              keyboardType="number-pad"
+                              value={customBookCounts[source._id] !== undefined ? customBookCounts[source._id] : '25'}
+                              onChangeText={(val) => handleBookCountChange(source._id, val)}
+                              selectTextOnFocus={true}
+                            />
+                            <Text style={styles.perBookInputLabel}>Qs</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.countBadge}>
+                            <Text style={styles.countBadgeText}>
+                              {source.questionCount || 0} Qs
+                            </Text>
+                          </View>
                         )}
                       </View>
-
-                      {/* Source Picker */}
-                      <Text style={styles.fieldLabel}>Select Question Bank</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-                        {availableSources.map((src) => {
-                          const isSelected = src._id === item.quizId;
-                          return (
-                            <TouchableOpacity
-                              key={src._id}
-                              style={[styles.sourceChip, isSelected && styles.sourceChipActive]}
-                              onPress={() => handleUpdateSource(item.id, 'quizId', src._id)}
-                            >
-                              <Text style={[styles.sourceChipText, isSelected && styles.sourceChipTextActive]}>
-                                {src.subject || src.title} ({src.questionCount} Qs)
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-
-                      {/* Count Selection */}
-                      <View style={{ marginTop: 10 }}>
-                        <View style={styles.countLabelRow}>
-                          <Text style={styles.fieldLabel}>Questions from this bank</Text>
-                          <Text style={styles.maxText}>Max available: {maxAvailable}</Text>
-                        </View>
-                        <TextInput
-                          style={styles.textInput}
-                          value={String(item.count)}
-                          onChangeText={(val) => handleUpdateSource(item.id, 'count', val)}
-                          keyboardType="numeric"
-                          placeholder="e.g. 100"
-                          placeholderTextColor="#64748b"
-                        />
-
-                        {/* Quick Preset Chips */}
-                        <View style={styles.presetChipsRow}>
-                          {['10', '25', '50', '100', String(maxAvailable)].map((presetVal) => {
-                            const isPresetActive = item.count === presetVal;
-                            return (
-                              <TouchableOpacity
-                                key={presetVal}
-                                style={[styles.presetChip, isPresetActive && styles.presetChipActive]}
-                                onPress={() => handleUpdateSource(item.id, 'count', presetVal)}
-                              >
-                                <Text style={[styles.presetChipText, isPresetActive && styles.presetChipTextActive]}>
-                                  {presetVal === String(maxAvailable) ? `All (${maxAvailable})` : presetVal}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })
+                    );
+                  })}
+                </View>
               )}
             </View>
 
-            {/* Test Settings (Timer & Options) */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionLabel}>Test Execution Settings</Text>
-
-              {/* Timer Choice */}
-              <View style={{ marginTop: 8 }}>
-                <View style={styles.settingRowHeader}>
-                  <Clock size={15} color="#818cf8" />
-                  <Text style={styles.settingLabel}>Timer Per Question</Text>
+            {/* Step 2: Global Question Target (when in Randomized Book Mix) */}
+            {distributionMode === 'random' ? (
+              <View style={styles.sectionCard}>
+                <View style={styles.sectionHeaderRow}>
+                  <Layers size={16} color="#818cf8" style={{ marginRight: 6 }} />
+                  <Text style={styles.sectionLabel}>2. Total Questions Preset</Text>
                 </View>
-                <View style={styles.timerChipsRow}>
-                  {timerChoices.map((choice) => {
-                    const isSelected = timerSeconds === choice.value;
+                <Text style={styles.sectionDesc}>
+                  Number of questions randomly sampled across your selected books.
+                </Text>
+
+                <View style={styles.presetsRow}>
+                  {countPresets.map((preset) => {
+                    const isSelected = targetCountPreset === preset.value;
                     return (
                       <TouchableOpacity
-                        key={choice.value}
-                        style={[styles.timerChip, isSelected && styles.timerChipActive]}
-                        onPress={() => setTimerSeconds(choice.value)}
+                        key={preset.label}
+                        style={[styles.presetChip, isSelected && styles.presetChipSelected]}
+                        onPress={() => setTargetCountPreset(preset.value)}
+                        activeOpacity={0.8}
                       >
-                        <Text style={[styles.timerChipText, isSelected && styles.timerChipTextActive]}>
-                          {choice.label}
+                        <Text
+                          style={[
+                            styles.presetChipText,
+                            isSelected && styles.presetChipTextSelected,
+                          ]}
+                        >
+                          {preset.label}
                         </Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
               </View>
+            ) : null}
 
-              {/* Shuffle Options Switch */}
-              <View style={styles.switchRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Shuffle size={15} color="#818cf8" style={{ marginRight: 8 }} />
-                  <Text style={styles.settingLabel}>Shuffle Answer Options</Text>
+            {/* Step 3: Destination Section & Test Options */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionLabel}>3. Destination Section & Options</Text>
+
+              {/* Destination Section Switcher */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Save to Quiz Section</Text>
+                <View style={styles.destinationRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.destinationBtn,
+                      destinationCategory === 'standard' && styles.destinationBtnActiveStandard,
+                    ]}
+                    onPress={() => setDestinationCategory('standard')}
+                    activeOpacity={0.8}
+                  >
+                    <Shield size={14} color={destinationCategory === 'standard' ? '#ffffff' : '#94a3b8'} />
+                    <Text style={[styles.destinationBtnText, destinationCategory === 'standard' && styles.destinationBtnTextActive]}>
+                      Standard Quizzes
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.destinationBtn,
+                      destinationCategory === 'custom' && styles.destinationBtnActiveCustom,
+                    ]}
+                    onPress={() => setDestinationCategory('custom')}
+                    activeOpacity={0.8}
+                  >
+                    <UserCheck size={14} color={destinationCategory === 'custom' ? '#ffffff' : '#94a3b8'} />
+                    <Text style={[styles.destinationBtnText, destinationCategory === 'custom' && styles.destinationBtnTextActive]}>
+                      Custom Quizzes
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Title Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Quiz Title</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={quizTitle}
+                  onChangeText={setQuizTitle}
+                  placeholder={defaultTitle}
+                  placeholderTextColor="#64748b"
+                />
+              </View>
+
+              {/* Timer Choice */}
+              <View style={styles.inputGroup}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                  <Clock size={14} color="#818cf8" style={{ marginRight: 6 }} />
+                  <Text style={styles.fieldLabel}>Question Timer Speed</Text>
+                </View>
+
+                <View style={styles.presetsRow}>
+                  {timerChoices.map((tc) => (
+                    <TouchableOpacity
+                      key={tc.label}
+                      style={[
+                        styles.presetChip,
+                        timerSeconds === tc.value && styles.presetChipSelected,
+                      ]}
+                      onPress={() => setTimerSeconds(tc.value)}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.presetChipText,
+                          timerSeconds === tc.value && styles.presetChipTextSelected,
+                        ]}
+                      >
+                        {tc.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Randomization Switches */}
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text style={styles.toggleTitle}>Randomize Question Sequence</Text>
+                  <Text style={styles.toggleDesc}>
+                    Shuffle question order randomly every time
+                  </Text>
+                </View>
+                <Switch
+                  value={shuffleQuestions}
+                  onValueChange={setShuffleQuestions}
+                  trackColor={{ false: '#334155', true: '#a855f7' }}
+                  thumbColor="#ffffff"
+                />
+              </View>
+
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text style={styles.toggleTitle}>Shuffle Answer Choice Options</Text>
+                  <Text style={styles.toggleDesc}>
+                    Randomize A, B, C, D choice order per question
+                  </Text>
                 </View>
                 <Switch
                   value={shuffleOptions}
                   onValueChange={setShuffleOptions}
                   trackColor={{ false: '#334155', true: '#6366f1' }}
-                  thumbColor={shuffleOptions ? '#818cf8' : '#cbd5e1'}
+                  thumbColor="#ffffff"
                 />
               </View>
 
-              {/* Save as Quiz Switch */}
-              <View style={styles.switchRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Save size={15} color="#818cf8" style={{ marginRight: 8 }} />
-                  <View>
-                    <Text style={styles.settingLabel}>Save as Permanent Quiz</Text>
-                    <Text style={styles.switchSubtext}>Keep this combined quiz in your Quiz library</Text>
-                  </View>
+              <View style={[styles.toggleRow, { borderBottomWidth: 0 }]}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text style={styles.toggleTitle}>Save to Quiz Directory</Text>
+                  <Text style={styles.toggleDesc}>
+                    Keep this test saved in selected directory section
+                  </Text>
                 </View>
                 <Switch
                   value={saveAsQuiz}
                   onValueChange={setSaveAsQuiz}
-                  trackColor={{ false: '#334155', true: '#6366f1' }}
-                  thumbColor={saveAsQuiz ? '#818cf8' : '#cbd5e1'}
+                  trackColor={{ false: '#334155', true: '#a855f7' }}
+                  thumbColor="#ffffff"
                 />
               </View>
             </View>
           </ScrollView>
 
-          {/* Footer Bar */}
+          {/* Footer Action Bar */}
           <View style={styles.modalFooter}>
-            <View style={styles.summaryBar}>
-              <Text style={styles.summaryLabel}>Total Questions:</Text>
-              <Text style={styles.summaryValue}>{totalQuestionsRequested} Qs</Text>
-            </View>
-
             <TouchableOpacity
-              style={[styles.startBtn, submitting && { opacity: 0.7 }]}
+              style={[
+                styles.generateBtn,
+                (submitting || selectedSourceIds.length === 0) && styles.disabledBtn,
+              ]}
               onPress={handleGenerateAndStart}
-              disabled={submitting}
+              disabled={submitting || selectedSourceIds.length === 0}
+              activeOpacity={0.8}
             >
               {submitting ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <>
-                  <Play size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.startBtnText}>Generate & Start Test</Text>
+                  <Sparkles size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.generateBtnText}>
+                    Create & Start Test ({finalEffectiveCount} Qs)
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -387,14 +570,14 @@ export default function CustomQuizBuilderModal({ visible, onClose, onStartTest }
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     justifyContent: 'flex-end',
   },
   modalContainer: {
     backgroundColor: '#0f172a',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '92%',
+    maxHeight: '90%',
     minHeight: '75%',
     borderWidth: 1,
     borderColor: '#334155',
@@ -404,8 +587,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 14,
+    paddingVertical: 14,
     backgroundColor: '#1e293b',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -418,17 +600,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconBadge: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     borderRadius: 10,
-    backgroundColor: '#312e81',
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.3)',
   },
   modalTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#f8fafc',
   },
   modalSubtitle: {
@@ -440,19 +624,49 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#334155',
+    backgroundColor: '#0f172a',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
   modalBody: {
-    paddingHorizontal: 10,
-    paddingVertical: 12,
+    padding: 14,
+  },
+  modeSwitcherContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#1e293b',
+    padding: 3,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  modeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 7,
+  },
+  modeBtnActive: {
+    backgroundColor: '#a855f7',
+  },
+  modeBtnText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginLeft: 5,
+  },
+  modeBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
   sectionCard: {
     backgroundColor: '#1e293b',
     borderRadius: 14,
-    padding: 12,
+    padding: 14,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#334155',
@@ -461,220 +675,244 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   sectionLabel: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#818cf8',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  addSourceBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#6366f1',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  addSourceText: {
-    color: '#FFFFFF',
-    fontSize: 11.5,
-    fontWeight: '700',
-    marginLeft: 4,
-  },
-  inputGroup: {
-    marginTop: 8,
-  },
-  fieldLabel: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: '#cbd5e1',
-    marginBottom: 6,
-  },
-  textInput: {
-    backgroundColor: '#0f172a',
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 13.5,
     color: '#f8fafc',
   },
-  allocationCard: {
+  sectionDesc: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  quickSelectBtn: {
+    paddingHorizontal: 4,
+  },
+  quickSelectText: {
+    fontSize: 11.5,
+    color: '#a855f7',
+    fontWeight: '700',
+  },
+  loadingBox: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  emptyText: {
+    color: '#64748b',
+    fontSize: 12.5,
+    fontStyle: 'italic',
+    paddingVertical: 10,
+  },
+  booksGrid: {
+    gap: 8,
+    marginTop: 4,
+  },
+  bookCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#0f172a',
     borderRadius: 10,
     padding: 10,
-    marginBottom: 10,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#334155',
   },
-  allocCardHeader: {
-    flexDirection: 'row',
+  bookCardSelected: {
+    borderColor: '#a855f7',
+    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#64748b',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  sourceIndexTag: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#c084fc',
-  },
-  pickerScroll: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  sourceChip: {
+    justifyContent: 'center',
     backgroundColor: '#1e293b',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: '#334155',
   },
-  sourceChipActive: {
-    backgroundColor: 'rgba(99, 102, 241, 0.25)',
-    borderColor: '#818cf8',
+  checkboxSelected: {
+    backgroundColor: '#a855f7',
+    borderColor: '#a855f7',
   },
-  sourceChipText: {
-    fontSize: 11.5,
-    color: '#94a3b8',
-    fontWeight: '500',
-  },
-  sourceChipTextActive: {
-    color: '#818cf8',
+  bookTitle: {
+    fontSize: 13.5,
     fontWeight: '700',
+    color: '#f8fafc',
   },
-  countLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  maxText: {
+  bookSubject: {
     fontSize: 11,
-    color: '#64748b',
+    color: '#94a3b8',
+    marginTop: 1,
   },
-  presetChipsRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  presetChip: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+  countBadge: {
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(99, 102, 241, 0.3)',
   },
-  presetChipActive: {
-    backgroundColor: '#6366f1',
-    borderColor: '#6366f1',
-  },
-  presetChipText: {
-    fontSize: 11.5,
-    color: '#cbd5e1',
-    fontWeight: '600',
-  },
-  presetChipTextActive: {
-    color: '#FFFFFF',
+  countBadgeText: {
+    fontSize: 10.5,
     fontWeight: '700',
+    color: '#818cf8',
   },
-  settingRowHeader: {
+  perBookInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-  },
-  settingLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#f8fafc',
-    marginLeft: 6,
-  },
-  timerChipsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 12,
-  },
-  timerChip: {
-    flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#1e293b',
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#a855f7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  perBookInput: {
+    color: '#f8fafc',
+    fontSize: 12,
+    fontWeight: '700',
+    width: 32,
+    textAlign: 'center',
+    padding: 0,
+  },
+  perBookInputLabel: {
+    color: '#a855f7',
+    fontSize: 10.5,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  presetChip: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
-    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
   },
-  timerChipActive: {
-    backgroundColor: 'rgba(99, 102, 241, 0.25)',
-    borderColor: '#818cf8',
+  presetChipSelected: {
+    backgroundColor: '#a855f7',
+    borderColor: '#a855f7',
   },
-  timerChipText: {
-    fontSize: 11.5,
-    color: '#94a3b8',
-    fontWeight: '500',
-  },
-  timerChipTextActive: {
-    color: '#818cf8',
-    fontWeight: '700',
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  switchSubtext: {
-    fontSize: 11,
-    color: '#64748b',
-    marginLeft: 6,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#64748b',
-    textAlign: 'center',
-    marginVertical: 16,
-  },
-  modalFooter: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    backgroundColor: '#1e293b',
-  },
-  summaryBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  summaryLabel: {
-    fontSize: 13.5,
+  presetChipText: {
+    fontSize: 12,
     fontWeight: '600',
     color: '#94a3b8',
   },
-  summaryValue: {
-    fontSize: 17,
+  presetChipTextSelected: {
+    color: '#ffffff',
     fontWeight: '800',
-    color: '#818cf8',
   },
-  startBtn: {
-    backgroundColor: '#6366f1',
+  inputGroup: {
+    marginTop: 10,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#cbd5e1',
+    marginBottom: 4,
+  },
+  destinationRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  destinationBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#0f172a',
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  destinationBtnActiveStandard: {
+    backgroundColor: '#6366f1',
+    borderColor: '#6366f1',
+  },
+  destinationBtnActiveCustom: {
+    backgroundColor: '#a855f7',
+    borderColor: '#a855f7',
+  },
+  destinationBtnText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#94a3b8',
+    marginLeft: 4,
+  },
+  destinationBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  textInput: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    color: '#f8fafc',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    marginTop: 6,
+  },
+  toggleTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#f8fafc',
+  },
+  toggleDesc: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  modalFooter: {
+    padding: 14,
+    backgroundColor: '#1e293b',
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  generateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#a855f7',
     paddingVertical: 12,
     borderRadius: 12,
   },
-  startBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+  disabledBtn: {
+    opacity: 0.5,
+  },
+  generateBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

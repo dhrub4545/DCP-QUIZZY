@@ -7,7 +7,7 @@ const Quiz = require('../models/Quiz');
  */
 const createQuiz = async (req, res) => {
   try {
-    const { title, subject, description, questions } = req.body;
+    const { title, subject, description, questions, isCustom, creator } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, message: 'Quiz title is required.' });
@@ -17,7 +17,9 @@ const createQuiz = async (req, res) => {
       title: title.trim(),
       subject: subject ? subject.trim() : 'General',
       description: description ? description.trim() : '',
-      questions: Array.isArray(questions) ? questions : []
+      questions: Array.isArray(questions) ? questions : [],
+      isCustom: isCustom !== undefined ? isCustom : true,
+      creator: creator ? creator.trim() : 'user'
     });
 
     await newQuiz.save();
@@ -39,26 +41,52 @@ const createQuiz = async (req, res) => {
  */
 const getAllQuizzes = async (req, res) => {
   try {
-    const quizzes = await Quiz.find({}, 'title subject description questionCount questions.topic createdAt updatedAt').sort({ createdAt: -1 });
-    
-    const formattedQuizzes = quizzes.map(q => {
-      const topicsSet = new Set();
-      if (Array.isArray(q.questions)) {
-        q.questions.forEach(question => {
-          if (question.topic) topicsSet.add(question.topic);
-        });
-      }
-      return {
-        _id: q._id,
-        title: q.title,
-        subject: q.subject || 'General',
-        description: q.description || '',
-        questionCount: q.questionCount || (q.questions ? q.questions.length : 0),
-        topics: Array.from(topicsSet),
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt
-      };
-    });
+    const currentUserId = req.user?.id || req.user?._id || req.query.userId || 'guest';
+
+    const quizzes = await Quiz.find(
+      {},
+      'title subject description questionCount questions.topic isCustom creator userId createdAt updatedAt'
+    ).sort({ createdAt: -1 });
+
+    const formattedQuizzes = quizzes
+      .map(q => {
+        const topicsSet = new Set();
+        if (Array.isArray(q.questions)) {
+          q.questions.forEach(question => {
+            if (question.topic) topicsSet.add(question.topic);
+          });
+        }
+
+        const titleLower = (q.title || '').toLowerCase();
+        const isCustomFlag = Boolean(
+          q.isCustom === true ||
+          q.creator === 'user' ||
+          titleLower.includes('custom') ||
+          titleLower.includes('combined')
+        );
+
+        return {
+          _id: q._id,
+          title: q.title,
+          subject: q.subject || 'General',
+          description: q.description || '',
+          questionCount: q.questionCount || (q.questions ? q.questions.length : 0),
+          topics: Array.from(topicsSet),
+          isCustom: isCustomFlag,
+          creator: q.creator || 'admin',
+          userId: q.userId || null,
+          createdAt: q.createdAt,
+          updatedAt: q.updatedAt
+        };
+      })
+      .filter(q => {
+        // Standard admin quizzes are public for all users
+        if (!q.isCustom) return true;
+
+        // Custom quizzes are visible ONLY to the user who created them (or guest session)
+        if (!q.userId || q.userId === 'guest' || q.userId === currentUserId) return true;
+        return false;
+      });
 
     return res.status(200).json({
       success: true,
@@ -127,10 +155,20 @@ const updateQuiz = async (req, res) => {
  */
 const deleteQuiz = async (req, res) => {
   try {
-    const quiz = await Quiz.findByIdAndDelete(req.params.id);
+    const quiz = await Quiz.findById(req.params.id);
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
     }
+
+    if (!quiz.isCustom && quiz.creator === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Standard platform quizzes cannot be deleted.'
+      });
+    }
+
+    await Quiz.findByIdAndDelete(req.params.id);
+
     return res.status(200).json({
       success: true,
       message: 'Quiz deleted successfully'
@@ -314,7 +352,8 @@ const getAvailableSources = async (req, res) => {
  */
 const generateCustomQuiz = async (req, res) => {
   try {
-    const { title, subject, description, sources, saveAsQuiz } = req.body;
+    const activeUserId = req.user?.id || req.user?._id || req.body.userId || 'guest';
+    const { title, subject, description, sources, saveAsQuiz, randomizeDistribution, targetTotalQuestions, destinationCategory } = req.body;
 
     if (!Array.isArray(sources) || sources.length === 0) {
       return res.status(400).json({
@@ -333,9 +372,28 @@ const generateCustomQuiz = async (req, res) => {
       return arr;
     };
 
+    // Calculate actual source allocations (Randomized vs Exact per book)
+    let processedSources = [...sources];
+
+    if (randomizeDistribution && targetTotalQuestions > 0 && sources.length > 1) {
+      // Generate random weights per source
+      const randomWeights = sources.map(() => Math.random() + 0.2); // min weight 0.2 to avoid 0
+      const totalWeight = randomWeights.reduce((sum, w) => sum + w, 0);
+
+      let allocatedSoFar = 0;
+      processedSources = sources.map((src, idx) => {
+        if (idx === sources.length - 1) {
+          return { ...src, count: Math.max(1, targetTotalQuestions - allocatedSoFar) };
+        }
+        const allocatedCount = Math.max(1, Math.round((randomWeights[idx] / totalWeight) * targetTotalQuestions));
+        allocatedSoFar += allocatedCount;
+        return { ...src, count: allocatedCount };
+      });
+    }
+
     let combinedQuestions = [];
 
-    for (const src of sources) {
+    for (const src of processedSources) {
       const { quizId, count } = src;
       const requestedCount = Number(count) || 0;
       if (!quizId || requestedCount <= 0) continue;
@@ -353,7 +411,7 @@ const generateCustomQuiz = async (req, res) => {
         // Convert subdocuments to plain objects so shuffling works seamlessly
         const rawQuestions = quizDoc.questions.map(q => (typeof q.toObject === 'function' ? q.toObject() : q));
         
-        // 1. Fully shuffle ALL available questions in this source (e.g., all 1144 questions in Medicine)
+        // 1. Fully shuffle ALL available questions in this source
         const fullyShuffled = shuffleArray(rawQuestions);
         
         // 2. Pick requestedCount questions randomly from the shuffled pool
@@ -390,9 +448,12 @@ const generateCustomQuiz = async (req, res) => {
       q.questionNumber = idx + 1;
     });
 
-    const quizTitle = (title && title.trim()) ? title.trim() : `Custom Combined Quiz (${combinedQuestions.length} Qs)`;
-    const quizSubject = (subject && subject.trim()) ? subject.trim() : 'Custom Mix';
-    const quizDescription = (description && description.trim()) ? description.trim() : `Custom generated quiz combining questions from ${sources.length} sources.`;
+    const isStandardTarget = destinationCategory === 'standard';
+    const defaultTitlePrefix = isStandardTarget ? 'Standard Practice Test' : 'Custom Combined Quiz';
+
+    const quizTitle = (title && title.trim()) ? title.trim() : `${defaultTitlePrefix} (${combinedQuestions.length} Qs)`;
+    const quizSubject = (subject && subject.trim()) ? subject.trim() : 'Mixed Practice';
+    const quizDescription = (description && description.trim()) ? description.trim() : `Quiz combining questions from ${sources.length} sources.`;
 
     let createdQuizDoc = null;
 
@@ -402,7 +463,10 @@ const generateCustomQuiz = async (req, res) => {
         subject: quizSubject,
         description: quizDescription,
         questions: combinedQuestions,
-        questionCount: combinedQuestions.length
+        questionCount: combinedQuestions.length,
+        isCustom: !isStandardTarget,
+        creator: isStandardTarget ? 'admin' : 'user',
+        userId: isStandardTarget ? null : activeUserId
       });
       await createdQuizDoc.save();
     }

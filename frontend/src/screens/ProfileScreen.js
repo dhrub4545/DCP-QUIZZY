@@ -133,6 +133,8 @@ export default function ProfileScreen({ navigation, route }) {
       navigation.navigate('Home');
     } else if (tabName === 'Quizzes') {
       navigation.navigate('Quizzes');
+    } else if (tabName === 'Study') {
+      navigation.navigate('Study');
     } else if (tabName === 'History') {
       navigation.navigate('History');
     }
@@ -271,9 +273,6 @@ export default function ProfileScreen({ navigation, route }) {
       <BottomTabBar
         activeTab="Profile"
         onTabPress={handleTabPress}
-        onAddQuizPress={() => {
-          navigation.navigate('Home', { openCreateModal: true });
-        }}
       />
     </SafeAreaView>
   );
