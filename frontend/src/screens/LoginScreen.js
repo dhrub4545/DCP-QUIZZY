@@ -22,9 +22,9 @@ import { loginApi, registerApi } from '../services/api';
 const { width } = Dimensions.get('window');
 
 const BG_IMAGES = [
-  require('../../assets/login_bg1.png'),
-  require('../../assets/login_bg2.png'),
-  require('../../assets/login_bg3.png'),
+  require('../../assets/login_bg1.jpg'),
+  require('../../assets/login_bg2.jpg'),
+  require('../../assets/login_bg3.jpg'),
 ];
 
 export default function LoginScreen({ navigation }) {
