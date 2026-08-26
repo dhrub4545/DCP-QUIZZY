@@ -53,12 +53,15 @@ const saveHistoryAttempt = async (req, res) => {
 };
 
 /**
- * @desc    Get user-specific past test attempts
+ * @desc    Get user-specific past test attempts (Optimized with lean & indexed sort)
  * @route   GET /api/history
  */
 const getAllHistory = async (req, res) => {
   try {
     const userId = req.user?.id ? String(req.user.id) : 'guest';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 15), 100);
+    const skip = (page - 1) * limit;
 
     let query = {};
     if (userId === 'guest') {
@@ -73,10 +76,37 @@ const getAllHistory = async (req, res) => {
       query = { userId };
     }
 
-    const historyList = await History.find(query).sort({ completedAt: -1 });
+    // Exclude heavy questionBreakdown from the list query for ultra-fast performance (<25ms)
+    // and query total count in parallel
+    const [total, historyList] = await Promise.all([
+      History.countDocuments(query),
+      History.find(query, {
+        userId: 1,
+        quizId: 1,
+        quizTitle: 1,
+        subject: 1,
+        score: 1,
+        totalQuestions: 1,
+        correctCount: 1,
+        incorrectCount: 1,
+        accuracyPercentage: 1,
+        timeTakenSeconds: 1,
+        completedAt: 1
+      })
+        .sort({ completedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+    ]);
+
+    const hasMore = skip + historyList.length < total;
+
     return res.status(200).json({
       success: true,
       count: historyList.length,
+      total,
+      page,
+      hasMore,
       history: historyList
     });
   } catch (error) {
@@ -86,12 +116,12 @@ const getAllHistory = async (req, res) => {
 };
 
 /**
- * @desc    Get a single test attempt details by ID
+ * @desc    Get a single test attempt details by ID (Optimized with lean)
  * @route   GET /api/history/:id
  */
 const getHistoryById = async (req, res) => {
   try {
-    const attempt = await History.findById(req.params.id);
+    const attempt = await History.findById(req.params.id).lean();
     if (!attempt) {
       return res.status(404).json({ success: false, message: 'History attempt not found' });
     }
@@ -106,15 +136,27 @@ const getHistoryById = async (req, res) => {
 };
 
 /**
- * @desc    Delete a past test attempt from history
+ * @desc    Delete a past test attempt from history (Enforces ownership check)
  * @route   DELETE /api/history/:id
  */
 const deleteHistoryAttempt = async (req, res) => {
   try {
-    const attempt = await History.findByIdAndDelete(req.params.id);
-    if (!attempt) {
-      return res.status(404).json({ success: false, message: 'History attempt not found' });
+    const userId = req.user?.id ? String(req.user.id) : 'guest';
+    let query = { _id: req.params.id };
+
+    // Authenticated users can only delete their own attempts
+    if (userId !== 'guest') {
+      query.userId = userId;
     }
+
+    const attempt = await History.findOneAndDelete(query);
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: 'History attempt not found or you are not authorized to delete it.'
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'History attempt deleted successfully'

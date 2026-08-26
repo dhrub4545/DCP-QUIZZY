@@ -80,10 +80,26 @@ async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
   throw new Error('All Gemini AI servers are currently busy or rate-limited. Please try again later.');
 }
 
+// In-memory cache for AI explanations (Max 5,000 items, LRU-like behavior)
+const explanationCache = new Map();
+const MAX_CACHE_SIZE = 5000;
+
+function getCacheKey(questionText, correctAnswerLetter) {
+  const normQ = (questionText || '').trim().toLowerCase().slice(0, 200);
+  const normA = (correctAnswerLetter || 'A').trim().toUpperCase();
+  return `${normQ}:::${normA}`;
+}
+
 /**
- * Generate comprehensive AI explanation for a single question
+ * Generate comprehensive AI explanation for a single question (With caching)
  */
 async function generateAiExplanation({ questionText, options, correctAnswerLetter, explanation }) {
+  const cacheKey = getCacheKey(questionText, correctAnswerLetter);
+
+  if (explanationCache.has(cacheKey)) {
+    return explanationCache.get(cacheKey);
+  }
+
   const prompt = `EXPERT ACADEMIC & MEDICAL TUTOR EXPLANATION GENERATOR:
 
 Question:
@@ -104,6 +120,15 @@ Provide an in-depth, highly educational explanation for this question formatted 
 
   const systemInstruction = 'You are an elite medical professor and exam prep tutor. Provide clear, encouraging, structured explanations.';
   const result = await callGeminiWithFallback(prompt, systemInstruction);
+
+  if (result && result.text) {
+    if (explanationCache.size >= MAX_CACHE_SIZE) {
+      const firstKey = explanationCache.keys().next().value;
+      explanationCache.delete(firstKey);
+    }
+    explanationCache.set(cacheKey, result.text);
+  }
+
   return result.text;
 }
 

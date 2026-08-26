@@ -36,16 +36,28 @@ async function pushMedicineToMongoDB() {
     console.log(`Found ${rawQuestions.length} questions in medicine.json.`);
 
     // Map and sanitize questions
-    const formattedQuestions = rawQuestions.map((q, idx) => ({
-      questionNumber: q.questionNumber || (idx + 1),
-      topic: (q.topic && q.topic.trim()) || 'General Medicine',
-      questionText: q.questionText || '',
-      options: Array.isArray(q.options) ? q.options : [],
-      correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
-      correctAnswerLetter: q.correctAnswerLetter || 'A',
-      explanation: q.explanation || 'No explanation provided.',
-      confidence: typeof q.confidence === 'number' ? q.confidence : 1.0
-    }));
+    const formattedQuestions = rawQuestions.map((q, idx) => {
+      const cloudUrl = q.cloudanary_link || q.cloudinary_link || q.explanationPic || q.explanation_pic || q.explanationImage || q.explanation_image || null;
+      const qPicUrl = q.questionpic || q.questionImage || q.questionPic || q.question_image || q.question_pic || q.image || null;
+
+      return {
+        questionNumber: q.questionNumber || (idx + 1),
+        topic: (q.topic && q.topic.trim()) || 'General Medicine',
+        questionText: q.questionText || '',
+        options: Array.isArray(q.options) ? q.options : [],
+        correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
+        correctAnswerLetter: q.correctAnswerLetter || 'A',
+        explanation: q.explanation || 'No explanation provided.',
+        confidence: typeof q.confidence === 'number' ? q.confidence : 1.0,
+        questionImage: qPicUrl,
+        questionpic: qPicUrl,
+        image: qPicUrl,
+        cloudanary_link: cloudUrl,
+        cloudinary_link: cloudUrl,
+        explanationPic: cloudUrl,
+        explanationImage: cloudUrl
+      };
+    });
 
     const quizTitle = 'Medicine Comprehensive Question Bank';
     const quizSubject = 'Medicine';

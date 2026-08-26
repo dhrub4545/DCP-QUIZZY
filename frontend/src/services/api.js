@@ -88,6 +88,11 @@ export const fetchQuizById = async (id) => {
   return response.data;
 };
 
+export const fetchQuizChunkApi = async (id, offset = 0, limit = 40) => {
+  const response = await api.get(`/quizzes/${id}?offset=${offset}&limit=${limit}`);
+  return response.data;
+};
+
 export const createQuizApi = async (quizData) => {
   const response = await api.post('/quizzes', quizData);
   return response.data;
@@ -100,6 +105,11 @@ export const updateQuizApi = async (id, quizData) => {
 
 export const fetchQuizSourcesApi = async () => {
   const response = await api.get('/quizzes/sources');
+  return response.data;
+};
+
+export const fetchQuestionsByTopicApi = async (topicName) => {
+  const response = await api.get(`/quizzes/topic/${encodeURIComponent(topicName)}`);
   return response.data;
 };
 
@@ -134,8 +144,8 @@ export const saveHistoryApi = async (attemptData) => {
   return response.data;
 };
 
-export const fetchHistoryApi = async () => {
-  const response = await api.get('/history');
+export const fetchHistoryApi = async (page = 1, limit = 15) => {
+  const response = await api.get(`/history?page=${page}&limit=${limit}`);
   return response.data;
 };
 

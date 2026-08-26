@@ -36,27 +36,23 @@ const createQuiz = async (req, res) => {
 };
 
 /**
- * @desc    Get all Quizzes (Lightweight directory list)
+ * @desc    Get all Quizzes (Ultra-fast lightweight directory list)
  * @route   GET /api/quizzes
  */
 const getAllQuizzes = async (req, res) => {
   try {
     const currentUserId = req.user?.id || req.user?._id || req.query.userId || 'guest';
 
+    // Exclude heavy questions array for high-concurrency efficiency
     const quizzes = await Quiz.find(
       {},
-      'title subject description questionCount questions.topic isCustom creator userId createdAt updatedAt'
-    ).sort({ createdAt: -1 });
+      'title subject description questionCount topics isCustom creator userId createdAt updatedAt'
+    )
+      .sort({ createdAt: -1 })
+      .lean();
 
     const formattedQuizzes = quizzes
       .map(q => {
-        const topicsSet = new Set();
-        if (Array.isArray(q.questions)) {
-          q.questions.forEach(question => {
-            if (question.topic) topicsSet.add(question.topic);
-          });
-        }
-
         const titleLower = (q.title || '').toLowerCase();
         const isCustomFlag = Boolean(
           q.isCustom === true ||
@@ -70,8 +66,8 @@ const getAllQuizzes = async (req, res) => {
           title: q.title,
           subject: q.subject || 'General',
           description: q.description || '',
-          questionCount: q.questionCount || (q.questions ? q.questions.length : 0),
-          topics: Array.from(topicsSet),
+          questionCount: q.questionCount || 0,
+          topics: Array.isArray(q.topics) ? q.topics : [],
           isCustom: isCustomFlag,
           creator: q.creator || 'admin',
           userId: q.userId || null,
@@ -99,16 +95,68 @@ const getAllQuizzes = async (req, res) => {
   }
 };
 
+// In-memory cache for full quiz retrieval (10 min TTL)
+const fullQuizCache = new Map();
+const QUIZ_CACHE_TTL = 10 * 60 * 1000;
+
 /**
- * @desc    Get a single Quiz by ID
+ * @desc    Get a single Quiz by ID (Supports fast $slice pagination & in-memory caching)
  * @route   GET /api/quizzes/:id
  */
 const getQuizById = async (req, res) => {
   try {
-    const quiz = await Quiz.findById(req.params.id);
+    const { offset, limit } = req.query;
+    const isChunked = offset !== undefined && limit !== undefined;
+
+    // 1. Handle fast slice/chunk request for instant lazy loading
+    if (isChunked) {
+      const skip = Math.max(0, parseInt(offset, 10) || 0);
+      const take = Math.min(Math.max(1, parseInt(limit, 10) || 30), 100);
+
+      const quiz = await Quiz.findById(req.params.id, {
+        title: 1,
+        subject: 1,
+        description: 1,
+        questionCount: 1,
+        topics: 1,
+        isCustom: 1,
+        creator: 1,
+        userId: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        questions: { $slice: [skip, take] }
+      }).lean();
+
+      if (!quiz) {
+        return res.status(404).json({ success: false, message: 'Quiz not found' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        quiz,
+        offset: skip,
+        limit: take,
+        totalQuestions: quiz.questionCount || 0
+      });
+    }
+
+    // 2. Standard full quiz request (served from in-memory cache if available)
+    const cached = fullQuizCache.get(req.params.id);
+    if (cached && Date.now() - cached.timestamp < QUIZ_CACHE_TTL) {
+      return res.status(200).json({
+        success: true,
+        quiz: cached.quiz,
+        cached: true
+      });
+    }
+
+    const quiz = await Quiz.findById(req.params.id).lean();
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
     }
+
+    fullQuizCache.set(req.params.id, { quiz, timestamp: Date.now() });
+
     return res.status(200).json({
       success: true,
       quiz
@@ -120,16 +168,104 @@ const getQuizById = async (req, res) => {
 };
 
 /**
+ * @desc    Get all questions for a specific topic across all quizzes in a single fast request
+ * @route   GET /api/quizzes/topic/:topicName
+ */
+const getQuestionsByTopic = async (req, res) => {
+  try {
+    const { topicName } = req.params;
+    if (!topicName || !topicName.trim()) {
+      return res.status(400).json({ success: false, message: 'Topic name is required.' });
+    }
+
+    const cleanTopic = topicName.trim();
+    const topicSubRegex = new RegExp(cleanTopic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+    const quizzes = await Quiz.find(
+      {
+        $or: [
+          { topics: topicSubRegex },
+          { subject: topicSubRegex }
+        ]
+      },
+      'title subject questions'
+    ).lean();
+
+    const topicQuestions = [];
+    const targetClean = cleanTopic.toLowerCase();
+
+    for (const quiz of quizzes) {
+      if (Array.isArray(quiz.questions)) {
+        for (const q of quiz.questions) {
+          const qTopic = (q.topic || '').trim().toLowerCase();
+          const qSubject = (quiz.subject || '').trim().toLowerCase();
+
+          if (
+            qTopic === targetClean ||
+            qTopic.includes(targetClean) ||
+            targetClean.includes(qTopic && qTopic !== 'general' ? qTopic : 'xyz_none') ||
+            (qTopic === '' && qSubject === targetClean)
+          ) {
+            topicQuestions.push({
+              _id: q._id,
+              questionNumber: q.questionNumber,
+              topic: q.topic || quiz.subject || 'General',
+              questionText: q.questionText,
+              options: q.options || [],
+              correctOptionIndex: q.correctOptionIndex,
+              correctAnswerLetter: q.correctAnswerLetter || 'A',
+              explanation: q.explanation || 'No explanation provided.',
+              confidence: q.confidence || 1.0,
+              questionImage: q.questionImage || q.questionpic || q.image || q.cloudanary_link || q.cloudinary_link || null,
+              explanationPic: q.explanationPic || q.explanationImage || null,
+              quizTitle: quiz.title,
+              quizSubject: quiz.subject || 'General'
+            });
+          }
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      topic: cleanTopic,
+      count: topicQuestions.length,
+      questions: topicQuestions
+    });
+  } catch (error) {
+    console.error('Error fetching questions by topic:', error);
+    return res.status(500).json({ success: false, message: 'Server error fetching topic questions' });
+  }
+};
+
+/**
  * @desc    Update Quiz metadata (title, subject, description)
  * @route   PUT /api/quizzes/:id
  */
 const updateQuiz = async (req, res) => {
   try {
     const { title, subject, description } = req.body;
+    const currentUserId = req.user?.id ? String(req.user.id) : 'guest';
     const quiz = await Quiz.findById(req.params.id);
 
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
+    }
+
+    // Protect standard admin quizzes
+    if (!quiz.isCustom && quiz.creator === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Standard platform quizzes cannot be modified.'
+      });
+    }
+
+    // Ownership check for custom quizzes
+    if (quiz.userId && quiz.userId !== 'guest' && quiz.userId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to update this quiz.'
+      });
     }
 
     if (title !== undefined) quiz.title = title.trim();
@@ -155,15 +291,25 @@ const updateQuiz = async (req, res) => {
  */
 const deleteQuiz = async (req, res) => {
   try {
+    const currentUserId = req.user?.id ? String(req.user.id) : 'guest';
     const quiz = await Quiz.findById(req.params.id);
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
     }
 
+    // Protect standard platform quizzes
     if (!quiz.isCustom && quiz.creator === 'admin') {
       return res.status(403).json({
         success: false,
         message: 'Standard platform quizzes cannot be deleted.'
+      });
+    }
+
+    // Ownership check for custom quizzes
+    if (quiz.userId && quiz.userId !== 'guest' && quiz.userId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete this quiz.'
       });
     }
 
@@ -186,6 +332,7 @@ const deleteQuiz = async (req, res) => {
 const addQuestionToQuiz = async (req, res) => {
   try {
     const { questionText, options, correctOptionIndex, correctAnswerLetter, explanation, topic } = req.body;
+    const currentUserId = req.user?.id ? String(req.user.id) : 'guest';
 
     if (!questionText || !questionText.trim()) {
       return res.status(400).json({ success: false, message: 'Question text is required.' });
@@ -197,6 +344,14 @@ const addQuestionToQuiz = async (req, res) => {
     const quiz = await Quiz.findById(req.params.id);
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
+    }
+
+    // Ownership check for custom quizzes
+    if (quiz.userId && quiz.userId !== 'guest' && quiz.userId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to add questions to this quiz.'
+      });
     }
 
     let correctIndex = Number(correctOptionIndex);
@@ -239,10 +394,19 @@ const updateQuestionInQuiz = async (req, res) => {
   try {
     const { id, questionId } = req.params;
     const { questionText, options, correctOptionIndex, correctAnswerLetter, explanation, topic } = req.body;
+    const currentUserId = req.user?.id ? String(req.user.id) : 'guest';
 
     const quiz = await Quiz.findById(id);
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
+    }
+
+    // Ownership check for custom quizzes
+    if (quiz.userId && quiz.userId !== 'guest' && quiz.userId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to update questions in this quiz.'
+      });
     }
 
     const question = quiz.questions.id(questionId);
@@ -291,10 +455,19 @@ const updateQuestionInQuiz = async (req, res) => {
 const deleteQuestionFromQuiz = async (req, res) => {
   try {
     const { id, questionId } = req.params;
+    const currentUserId = req.user?.id ? String(req.user.id) : 'guest';
 
     const quiz = await Quiz.findById(id);
     if (!quiz) {
       return res.status(404).json({ success: false, message: 'Quiz not found' });
+    }
+
+    // Ownership check for custom quizzes
+    if (quiz.userId && quiz.userId !== 'guest' && quiz.userId !== currentUserId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to delete questions from this quiz.'
+      });
     }
 
     quiz.questions.pull({ _id: questionId });
@@ -312,29 +485,26 @@ const deleteQuestionFromQuiz = async (req, res) => {
 };
 
 /**
- * @desc    Get all available Question Sources (quizzes with summary & topic list)
+ * @desc    Get all available Question Sources (Optimized summary & topic list)
  * @route   GET /api/quizzes/sources
  */
 const getAvailableSources = async (req, res) => {
   try {
-    const quizzes = await Quiz.find({}, 'title subject description questionCount questions.topic createdAt');
+    const quizzes = await Quiz.find(
+      {},
+      'title subject description questionCount topics createdAt'
+    )
+      .sort({ createdAt: -1 })
+      .lean();
     
-    const sources = quizzes.map(q => {
-      const topicsSet = new Set();
-      if (Array.isArray(q.questions)) {
-        q.questions.forEach(question => {
-          if (question.topic) topicsSet.add(question.topic);
-        });
-      }
-      return {
-        _id: q._id,
-        title: q.title,
-        subject: q.subject || 'General',
-        description: q.description || '',
-        questionCount: q.questionCount || (q.questions ? q.questions.length : 0),
-        topics: Array.from(topicsSet)
-      };
-    });
+    const sources = quizzes.map(q => ({
+      _id: q._id,
+      title: q.title,
+      subject: q.subject || 'General',
+      description: q.description || '',
+      questionCount: q.questionCount || 0,
+      topics: Array.isArray(q.topics) ? q.topics : []
+    }));
 
     return res.status(200).json({
       success: true,
@@ -400,16 +570,15 @@ const generateCustomQuiz = async (req, res) => {
 
       let quizDoc = null;
       if (mongoose.Types.ObjectId.isValid(quizId)) {
-        quizDoc = await Quiz.findById(quizId);
+        quizDoc = await Quiz.findById(quizId).lean();
       } else {
         quizDoc = await Quiz.findOne({
           $or: [{ title: quizId }, { subject: quizId }]
-        });
+        }).lean();
       }
 
       if (quizDoc && Array.isArray(quizDoc.questions) && quizDoc.questions.length > 0) {
-        // Convert subdocuments to plain objects so shuffling works seamlessly
-        const rawQuestions = quizDoc.questions.map(q => (typeof q.toObject === 'function' ? q.toObject() : q));
+        const rawQuestions = quizDoc.questions;
         
         // 1. Fully shuffle ALL available questions in this source
         const fullyShuffled = shuffleArray(rawQuestions);
@@ -426,7 +595,9 @@ const generateCustomQuiz = async (req, res) => {
           correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
           correctAnswerLetter: q.correctAnswerLetter || 'A',
           explanation: q.explanation || 'No explanation provided.',
-          confidence: q.confidence || 1.0
+          confidence: q.confidence || 1.0,
+          questionImage: q.questionImage || q.questionpic || q.image || q.cloudanary_link || q.cloudinary_link || null,
+          explanationPic: q.explanationPic || q.explanationImage || null
         }));
 
         combinedQuestions.push(...tagged);
@@ -500,6 +671,7 @@ module.exports = {
   updateQuestionInQuiz,
   deleteQuestionFromQuiz,
   getAvailableSources,
-  generateCustomQuiz
+  generateCustomQuiz,
+  getQuestionsByTopic
 };
 

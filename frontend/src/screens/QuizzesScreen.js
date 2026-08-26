@@ -5,6 +5,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   Pressable,
   ActivityIndicator,
@@ -12,10 +13,12 @@ import {
   RefreshControl,
   TextInput,
   StatusBar,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   BookOpen,
+  FolderKanban,
   Search,
   X,
   Edit3,
@@ -76,7 +79,30 @@ export default function QuizzesScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       loadQuizzes(quizzes.length === 0);
-    }, [])
+
+      const onBackPress = () => {
+        if (configModalVisible) {
+          setConfigModalVisible(false);
+          return true;
+        }
+        if (manageModalVisible) {
+          setManageModalVisible(false);
+          return true;
+        }
+        if (customBuilderVisible) {
+          setCustomBuilderVisible(false);
+          return true;
+        }
+        if (searchQuery && searchQuery.trim()) {
+          setSearchQuery('');
+          return true;
+        }
+        return false;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [configModalVisible, manageModalVisible, customBuilderVisible, searchQuery])
   );
 
   const handleRefresh = () => {
@@ -126,6 +152,12 @@ export default function QuizzesScreen({ navigation }) {
     setConfigModalVisible(true);
   };
 
+  const isNmcleQuiz = (q) => {
+    const t = (q.title || '').toUpperCase();
+    const s = (q.subject || '').toUpperCase();
+    return t.includes('NMCLE') || s.includes('NMCLE');
+  };
+
   const isCustomQuiz = (q) => {
     if (q.isCustom === true) return true;
     if (q.creator === 'user') return true;
@@ -134,11 +166,18 @@ export default function QuizzesScreen({ navigation }) {
     return false;
   };
 
-  // Separate Standard (Admin) vs Custom (User) Quizzes
-  const standardQuizzes = quizzes.filter((q) => !isCustomQuiz(q));
-  const customQuizzes = quizzes.filter((q) => isCustomQuiz(q));
+  const isBookQuiz = (q) => {
+    return !isNmcleQuiz(q) && !isCustomQuiz(q);
+  };
 
-  const currentCategoryQuizzes = quizCategory === 'standard' ? standardQuizzes : customQuizzes;
+  const nmcleQuizzes = quizzes.filter(isNmcleQuiz);
+  const bookQuizzes = quizzes.filter(isBookQuiz);
+  const customQuizzes = quizzes.filter(isCustomQuiz);
+
+  let currentCategoryQuizzes = quizzes;
+  if (quizCategory === 'nmcle') currentCategoryQuizzes = nmcleQuizzes;
+  else if (quizCategory === 'book') currentCategoryQuizzes = bookQuizzes;
+  else if (quizCategory === 'custom') currentCategoryQuizzes = customQuizzes;
 
   // Filter quizzes by search query (Shows ALL when search is blank)
   const filteredQuizzes = currentCategoryQuizzes.filter((q) => {
@@ -173,9 +212,13 @@ export default function QuizzesScreen({ navigation }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Quiz Directory</Text>
           <Text style={styles.headerSubtitle}>
-            {quizCategory === 'standard'
-              ? `${standardQuizzes.length} Admin Quizzes (Public)`
-              : `${customQuizzes.length} Custom Quizzes (My Created Tests)`}
+            {quizCategory === 'nmcle'
+              ? `${nmcleQuizzes.length} NMCLE Exam Sets`
+              : quizCategory === 'book'
+              ? `${bookQuizzes.length} Medical Books`
+              : quizCategory === 'custom'
+              ? `${customQuizzes.length} Custom Quizzes`
+              : `${quizzes.length} Total Sets & Books`}
           </Text>
         </View>
 
@@ -189,51 +232,103 @@ export default function QuizzesScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Top Dual Section Switcher: Standard Quizzes (Admin) vs Custom Quizzes (User) */}
-      <View style={styles.sectionSwitcherContainer}>
-        <TouchableOpacity
-          style={[
-            styles.sectionBtn,
-            quizCategory === 'standard' && styles.sectionBtnActive,
-          ]}
-          onPress={() => setQuizCategory('standard')}
-          activeOpacity={0.8}
+      {/* Top Folder / Category Switcher Pills */}
+      <View style={styles.sectionSwitcherWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.sectionSwitcherContainer}
         >
-          <Shield
-            size={15}
-            color={quizCategory === 'standard' ? '#ffffff' : '#94a3b8'}
-          />
-          <Text
+          <TouchableOpacity
             style={[
-              styles.sectionBtnText,
-              quizCategory === 'standard' && styles.sectionBtnTextActive,
+              styles.sectionBtn,
+              quizCategory === 'all' && styles.sectionBtnActive,
             ]}
+            onPress={() => setQuizCategory('all')}
+            activeOpacity={0.8}
           >
-            Standard ({standardQuizzes.length})
-          </Text>
-        </TouchableOpacity>
+            <FolderKanban
+              size={13}
+              color={quizCategory === 'all' ? '#ffffff' : '#94a3b8'}
+            />
+            <Text
+              style={[
+                styles.sectionBtnText,
+                quizCategory === 'all' && styles.sectionBtnTextActive,
+              ]}
+            >
+              All ({quizzes.length})
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.sectionBtn,
-            quizCategory === 'custom' && styles.sectionBtnActiveCustom,
-          ]}
-          onPress={() => setQuizCategory('custom')}
-          activeOpacity={0.8}
-        >
-          <UserCheck
-            size={15}
-            color={quizCategory === 'custom' ? '#ffffff' : '#94a3b8'}
-          />
-          <Text
+          <TouchableOpacity
             style={[
-              styles.sectionBtnText,
-              quizCategory === 'custom' && styles.sectionBtnTextActive,
+              styles.sectionBtn,
+              quizCategory === 'nmcle' && styles.sectionBtnActiveNmcle,
             ]}
+            onPress={() => setQuizCategory('nmcle')}
+            activeOpacity={0.8}
           >
-            Custom Quizzes ({customQuizzes.length})
-          </Text>
-        </TouchableOpacity>
+            <Shield
+              size={13}
+              color={quizCategory === 'nmcle' ? '#ffffff' : '#818cf8'}
+            />
+            <Text
+              style={[
+                styles.sectionBtnText,
+                quizCategory === 'nmcle' && styles.sectionBtnTextActive,
+              ]}
+            >
+              NMCLE Sets ({nmcleQuizzes.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.sectionBtn,
+              quizCategory === 'book' && styles.sectionBtnActiveBook,
+            ]}
+            onPress={() => setQuizCategory('book')}
+            activeOpacity={0.8}
+          >
+            <BookOpen
+              size={13}
+              color={quizCategory === 'book' ? '#ffffff' : '#38bdf8'}
+            />
+            <Text
+              style={[
+                styles.sectionBtnText,
+                quizCategory === 'book' && styles.sectionBtnTextActive,
+              ]}
+            >
+              Medical Books ({bookQuizzes.length})
+            </Text>
+          </TouchableOpacity>
+
+          {customQuizzes.length > 0 && (
+            <TouchableOpacity
+              style={[
+                styles.sectionBtn,
+                quizCategory === 'custom' && styles.sectionBtnActiveCustom,
+              ]}
+              onPress={() => setQuizCategory('custom')}
+              activeOpacity={0.8}
+            >
+              <UserCheck
+                size={13}
+                color={quizCategory === 'custom' ? '#ffffff' : '#fbbf24'}
+              />
+              <Text
+                style={[
+                  styles.sectionBtnText,
+                  quizCategory === 'custom' && styles.sectionBtnTextActive,
+                ]}
+              >
+                Custom ({customQuizzes.length})
+              </Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
       </View>
 
       {/* Sleek Modern Floating Search Capsule */}
@@ -509,29 +604,43 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '700',
   },
+  sectionSwitcherWrapper: {
+    backgroundColor: '#0f172a',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
   sectionSwitcherContainer: {
+    paddingHorizontal: 10,
+    gap: 8,
     flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sectionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1e293b',
-    marginHorizontal: 10,
-    marginTop: 8,
-    padding: 3,
-    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#334155',
   },
-  sectionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 7,
-  },
   sectionBtnActive: {
     backgroundColor: '#6366f1',
+    borderColor: '#818cf8',
+  },
+  sectionBtnActiveNmcle: {
+    backgroundColor: '#4f46e5',
+    borderColor: '#818cf8',
+  },
+  sectionBtnActiveBook: {
+    backgroundColor: '#0284c7',
+    borderColor: '#38bdf8',
   },
   sectionBtnActiveCustom: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#d97706',
+    borderColor: '#fbbf24',
   },
   sectionBtnText: {
     fontSize: 12,

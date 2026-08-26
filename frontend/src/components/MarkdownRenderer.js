@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, PanResponder, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Maximize2, X, ZoomIn, ZoomOut, RotateCcw, MoveHorizontal } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, PanResponder, Platform, Dimensions, Animated } from 'react-native';
+import { X } from 'lucide-react-native';
+import ZoomableImageCard from './ZoomableImageCard';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 function formatCellText(text) {
   if (!text) return '';
@@ -34,75 +36,239 @@ function normalizeTableRows(headers, rawRows) {
 }
 
 /**
- * Interactive A4 Table Renderer Component
- * Locks table layout to standard A4 document width (794px) with dedicated column proportions.
+ * Enhanced Table Component (Strict A4 Paper Format + Responsive Mobile Card)
+ * Clean inline card preview with full-screen translucent inspection modal (matches ZoomableImageCard UX)
  * Supports light theme for Study Mode and dark theme for default app mode.
  */
 function InteractiveTableRenderer({ block, theme = 'dark' }) {
   const isLight = theme === 'light';
 
-  const [zoomModalVisible, setZoomModalVisible] = useState(false);
-  const [zoomScale, setZoomScale] = useState(1.0);
-  const [isPinching, setIsPinching] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [rawTableHeight, setRawTableHeight] = useState(0);
+
+  const scale = useRef(new Animated.Value(1)).current;
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const currentScale = useRef(1);
+  const currentPan = useRef({ x: 0, y: 0 });
 
   const initialDistanceRef = useRef(null);
   const initialScaleRef = useRef(1.0);
-  const currentScaleRef = useRef(1.0);
+  const initialFocalRef = useRef({ x: 0, y: 0 });
+  const initialPanRef = useRef({ x: 0, y: 0 });
+  const lastTapRef = useRef(0);
 
   useEffect(() => {
-    currentScaleRef.current = zoomScale;
-  }, [zoomScale]);
+    const sSub = scale.addListener((v) => {
+      currentScale.current = v.value;
+    });
+    const pSub = pan.addListener((v) => {
+      currentPan.current = v;
+    });
+    return () => {
+      scale.removeListener(sSub);
+      pan.removeListener(pSub);
+    };
+  }, []);
 
   const synchronizedRows = normalizeTableRows(block.headers, block.rows);
   const colCount = Math.max(block.headers.length, (synchronizedRows[0] || []).length, 1);
-  const A4_WIDTH = 794;
+  const A4_WIDTH = 760;
 
-  const getTouchDistance = (touches) => {
-    if (!touches || touches.length < 2) return 0;
-    const [t1, t2] = touches;
-    const dx = t1.pageX - t2.pageX;
-    const dy = t1.pageY - t2.pageY;
-    return Math.sqrt(dx * dx + dy * dy);
+  // Proportional scale factor to fit full A4 width within mobile window card
+  const containerWidth = Math.min(SCREEN_WIDTH - 52, 480);
+  const scaleRatio = Number((containerWidth / A4_WIDTH).toFixed(4));
+  const estimatedHeight = Math.max(120, (synchronizedRows.length + 1) * 38);
+  const inlineHeight = (rawTableHeight > 0 ? rawTableHeight : estimatedHeight) * scaleRatio;
+
+  const resetTableZoom = (animated = true) => {
+    if (animated) {
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: 1,
+          useNativeDriver: true,
+          bounciness: 4,
+          speed: 16,
+        }),
+        Animated.spring(pan, {
+          toValue: { x: 0, y: 0 },
+          useNativeDriver: true,
+          bounciness: 4,
+          speed: 16,
+        }),
+      ]).start();
+    } else {
+      scale.setValue(1);
+      pan.setValue({ x: 0, y: 0 });
+    }
+  };
+
+  const clampTablePanToBounds = (s) => {
+    const tblH = rawTableHeight || estimatedHeight;
+    const maxPanX = Math.max(0, (A4_WIDTH * s - SCREEN_WIDTH) / 2 + 50);
+    const maxPanY = Math.max(0, (tblH * s - SCREEN_HEIGHT) / 2 + 50);
+    const targetX = Math.max(-maxPanX, Math.min(maxPanX, currentPan.current.x));
+    const targetY = Math.max(-maxPanY, Math.min(maxPanY, currentPan.current.y));
+
+    if (targetX !== currentPan.current.x || targetY !== currentPan.current.y) {
+      Animated.spring(pan, {
+        toValue: { x: targetX, y: targetY },
+        useNativeDriver: true,
+        bounciness: 4,
+        speed: 16,
+      }).start();
+    }
+  };
+
+  const handleDoubleTapAt = (touchX, touchY) => {
+    if (currentScale.current > 1.1) {
+      resetTableZoom(true);
+    } else {
+      const targetScale = 1.9;
+      const targetPanX = (SCREEN_WIDTH / 2 - touchX) * (targetScale - 1);
+      const targetPanY = (SCREEN_HEIGHT / 2 - touchY) * (targetScale - 1);
+
+      const maxPanX = Math.max(0, (A4_WIDTH * targetScale - SCREEN_WIDTH) / 2);
+      const maxPanY = Math.max(0, ((rawTableHeight || estimatedHeight) * targetScale - SCREEN_HEIGHT) / 2);
+      const boundedPanX = Math.max(-maxPanX, Math.min(maxPanX, targetPanX));
+      const boundedPanY = Math.max(-maxPanY, Math.min(maxPanY, targetPanY));
+
+      Animated.parallel([
+        Animated.spring(scale, {
+          toValue: targetScale,
+          useNativeDriver: true,
+          bounciness: 4,
+          speed: 16,
+        }),
+        Animated.spring(pan, {
+          toValue: { x: boundedPanX, y: boundedPanY },
+          useNativeDriver: true,
+          bounciness: 4,
+          speed: 16,
+        }),
+      ]).start();
+    }
   };
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponderCapture: (evt) => evt.nativeEvent.touches.length === 2,
-      onMoveShouldSetPanResponderCapture: (evt) => evt.nativeEvent.touches.length === 2,
-      onStartShouldSetPanResponder: (evt) => evt.nativeEvent.touches.length === 2,
-      onMoveShouldSetPanResponder: (evt) => evt.nativeEvent.touches.length === 2,
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (evt, gs) => {
+        return (
+          evt.nativeEvent.touches.length >= 2 ||
+          Math.abs(gs.dx) > 3 ||
+          Math.abs(gs.dy) > 3
+        );
+      },
       onPanResponderGrant: (evt) => {
         if (evt.nativeEvent.touches.length === 2) {
-          const distance = getTouchDistance(evt.nativeEvent.touches);
-          initialDistanceRef.current = distance;
-          initialScaleRef.current = currentScaleRef.current;
-          setIsPinching(true);
-        }
-      },
-      onPanResponderMove: (evt) => {
-        if (evt.nativeEvent.touches.length === 2 && initialDistanceRef.current && initialDistanceRef.current > 0) {
-          const currentDistance = getTouchDistance(evt.nativeEvent.touches);
-          if (currentDistance > 0) {
-            const factor = currentDistance / initialDistanceRef.current;
-            const newScale = Math.min(Math.max(initialScaleRef.current * factor, 0.35), 2.5);
-            setZoomScale(Number(newScale.toFixed(2)));
+          const [t1, t2] = evt.nativeEvent.touches;
+          initialDistanceRef.current = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+          initialScaleRef.current = currentScale.current;
+          initialFocalRef.current = {
+            x: (t1.pageX + t2.pageX) / 2,
+            y: (t1.pageY + t2.pageY) / 2,
+          };
+          initialPanRef.current = { ...currentPan.current };
+        } else if (evt.nativeEvent.touches.length === 1) {
+          const now = Date.now();
+          const touch = evt.nativeEvent.touches[0];
+          if (now - lastTapRef.current < 300) {
+            handleDoubleTapAt(touch.pageX, touch.pageY);
+            lastTapRef.current = 0;
+          } else {
+            lastTapRef.current = now;
+            initialPanRef.current = { ...currentPan.current };
           }
         }
       },
-      onPanResponderRelease: () => {
+      onPanResponderMove: (evt, gs) => {
+        if (evt.nativeEvent.touches.length === 2) {
+          const [t1, t2] = evt.nativeEvent.touches;
+          const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+          const currentFocal = {
+            x: (t1.pageX + t2.pageX) / 2,
+            y: (t1.pageY + t2.pageY) / 2,
+          };
+
+          if (initialDistanceRef.current && initialDistanceRef.current > 0) {
+            const factor = dist / initialDistanceRef.current;
+            const newScale = Math.min(Math.max(initialScaleRef.current * factor, 0.75), 3.5);
+
+            const focalShiftX =
+              (currentFocal.x - SCREEN_WIDTH / 2) * (1 - newScale / initialScaleRef.current);
+            const focalShiftY =
+              (currentFocal.y - SCREEN_HEIGHT / 2) * (1 - newScale / initialScaleRef.current);
+            const deltaFocalX = currentFocal.x - initialFocalRef.current.x;
+            const deltaFocalY = currentFocal.y - initialFocalRef.current.y;
+
+            const nextPanX = initialPanRef.current.x + deltaFocalX + focalShiftX;
+            const nextPanY = initialPanRef.current.y + deltaFocalY + focalShiftY;
+
+            scale.setValue(newScale);
+            pan.setValue({ x: nextPanX, y: nextPanY });
+          } else {
+            initialDistanceRef.current = dist;
+            initialScaleRef.current = currentScale.current;
+            initialFocalRef.current = currentFocal;
+            initialPanRef.current = { ...currentPan.current };
+          }
+        } else if (evt.nativeEvent.touches.length === 1) {
+          const nextPanX = initialPanRef.current.x + gs.dx;
+          const nextPanY = initialPanRef.current.y + gs.dy;
+          pan.setValue({
+            x: nextPanX,
+            y: nextPanY,
+          });
+        }
+      },
+      onPanResponderRelease: (evt, gs) => {
         initialDistanceRef.current = null;
-        setIsPinching(false);
+        if (Math.abs(gs.dx) < 6 && Math.abs(gs.dy) < 6) {
+          const touch = evt.nativeEvent;
+          const tblH = rawTableHeight || estimatedHeight;
+          const curW = A4_WIDTH * currentScale.current;
+          const curH = tblH * currentScale.current;
+          const tblTop = (SCREEN_HEIGHT - curH) / 2 + currentPan.current.y;
+          const tblBottom = (SCREEN_HEIGHT + curH) / 2 + currentPan.current.y;
+          const tblLeft = (SCREEN_WIDTH - curW) / 2 + currentPan.current.x;
+          const tblRight = (SCREEN_WIDTH + curW) / 2 + currentPan.current.x;
+
+          if (
+            touch.pageY < tblTop ||
+            touch.pageY > tblBottom ||
+            touch.pageX < tblLeft ||
+            touch.pageX > tblRight
+          ) {
+            setModalVisible(false);
+            return;
+          }
+        }
+
+        if (currentScale.current < 1.0) {
+          resetTableZoom(true);
+        } else if (currentScale.current > 3.5) {
+          Animated.spring(scale, {
+            toValue: 3.0,
+            useNativeDriver: true,
+            bounciness: 4,
+            speed: 16,
+          }).start();
+        } else {
+          clampTablePanToBounds(currentScale.current);
+        }
       },
       onPanResponderTerminate: () => {
         initialDistanceRef.current = null;
-        setIsPinching(false);
+        if (currentScale.current < 1.0) {
+          resetTableZoom(true);
+        }
       },
     })
   ).current;
 
   const getColWidth = (colIdx) => {
     if (colCount <= 1) return A4_WIDTH - 24;
-    if (colCount === 2) return colIdx === 0 ? 280 : A4_WIDTH - 304;
+    if (colCount === 2) return colIdx === 0 ? 260 : A4_WIDTH - 284;
     if (colCount === 3) return colIdx < 2 ? 180 : A4_WIDTH - 384;
     if (colCount === 4) return colIdx < 3 ? 140 : A4_WIDTH - 444;
 
@@ -110,20 +276,8 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
       return Math.max(100, Math.floor(520 / (colCount - 1)));
     } else {
       const sumOthers = (colCount - 1) * Math.max(100, Math.floor(520 / (colCount - 1)));
-      return Math.max(250, A4_WIDTH - sumOthers - 24);
+      return Math.max(240, A4_WIDTH - sumOthers - 24);
     }
-  };
-
-  const handleZoomIn = () => {
-    setZoomScale((prev) => Math.min(prev + 0.25, 2.5));
-  };
-
-  const handleZoomOut = () => {
-    setZoomScale((prev) => Math.max(prev - 0.25, 0.4));
-  };
-
-  const handleSetScale = (scale) => {
-    setZoomScale(scale);
   };
 
   const renderA4TableBody = () => (
@@ -133,6 +287,12 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
         { width: A4_WIDTH },
         isLight && { backgroundColor: '#ffffff', borderColor: '#cbd5e1' },
       ]}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        if (h > 0 && Math.abs(h - rawTableHeight) > 2) {
+          setRawTableHeight(h);
+        }
+      }}
     >
       {/* Table Header */}
       {block.headers.length > 0 && (
@@ -200,161 +360,72 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
 
   return (
     <View style={styles.tableWrapper}>
-      {/* Table Header Bar */}
-      <View style={styles.tableActionBar}>
-        <View
-          style={[
-            styles.tableBadge,
-            isLight && { backgroundColor: '#e0e7ff', borderColor: '#c7d2fe' },
-          ]}
-        >
-          <MoveHorizontal size={14} color={isLight ? '#4338ca' : '#818cf8'} style={{ marginRight: 4 }} />
-          <Text style={[styles.tableBadgeText, isLight && { color: '#4338ca' }]}>
-            Fixed A4 Format ({colCount} Cols)
-          </Text>
+      {/* Scaled Inline A4 Table Card (Fills Mobile Window Width like a Picture) */}
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => {
+          resetTableZoom(false);
+          setModalVisible(true);
+        }}
+        style={[
+          styles.inlineTableCard,
+          isLight ? styles.inlineTableCardLight : styles.inlineTableCardDark,
+        ]}
+      >
+        <View style={{ width: containerWidth, height: inlineHeight, overflow: 'hidden', alignSelf: 'center' }}>
+          <View
+            style={{
+              width: A4_WIDTH,
+              transform: [
+                { translateX: -A4_WIDTH * ((1 - scaleRatio) / 2) },
+                { translateY: -(rawTableHeight || estimatedHeight) * ((1 - scaleRatio) / 2) },
+                { scale: scaleRatio },
+              ],
+            }}
+          >
+            {renderA4TableBody()}
+          </View>
         </View>
+      </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.zoomBtn, isLight && { backgroundColor: '#4338ca' }]}
-          onPress={() => {
-            setZoomScale(1.0);
-            setZoomModalVisible(true);
-          }}
-          activeOpacity={0.8}
+      {/* Full-Screen Translucent Table Inspection Modal (Gallery-Grade Focal Zoom) */}
+      {modalVisible && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          presentationStyle="overFullScreen"
+          onRequestClose={() => setModalVisible(false)}
         >
-          <Maximize2 size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
-          <Text style={styles.zoomBtnText}>Zoom A4 Page</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Inline Horizontal Scroll View at Fixed A4 Width */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={true}
-        nestedScrollEnabled={true}
-        contentContainerStyle={{ paddingBottom: 6 }}
-      >
-        {renderA4TableBody()}
-      </ScrollView>
-
-      {/* Fullscreen A4 Inspection & Zoom Modal */}
-      <Modal
-        visible={zoomModalVisible}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setZoomModalVisible(false)}
-      >
-        <SafeAreaView
-          style={[
-            styles.zoomModalContainer,
-            isLight && { backgroundColor: '#f8fafc' },
-          ]}
-        >
-          {/* Modal Header Controls */}
-          <View
-            style={[
-              styles.zoomModalHeader,
-              isLight && { backgroundColor: '#ffffff', borderBottomColor: '#e2e8f0' },
-            ]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.zoomModalTitle, isLight && { color: '#0f172a' }]}>
-                A4 Document Table Inspection
-              </Text>
-              <Text style={[styles.zoomModalSubtitle, isLight && { color: '#64748b' }]}>
-                Format: 794px A4 Width • Scale: {Math.round(zoomScale * 100)}% • Pinch to zoom ✌️
-              </Text>
-            </View>
-
-            {/* Close Button */}
+          <View style={styles.tableModalBackdrop} {...panResponder.panHandlers}>
+            {/* Absolute Fullscreen Tap-Outside-to-Close Touch Layer */}
             <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setZoomModalVisible(false)}
-            >
-              <X size={18} color="#ffffff" />
-            </TouchableOpacity>
-          </View>
+              activeOpacity={1}
+              style={StyleSheet.absoluteFillObject}
+              onPress={() => setModalVisible(false)}
+            />
 
-          {/* Quick Preset Zoom Scale Toolbar */}
-          <View
-            style={[
-              styles.zoomPresetToolbar,
-              isLight && { backgroundColor: '#ffffff', borderBottomColor: '#e2e8f0' },
-            ]}
-          >
-            <Text style={[styles.presetLabel, isLight && { color: '#64748b' }]}>Zoom:</Text>
-            {[
-              { label: 'Fit', scale: 0.45 },
-              { label: '75%', scale: 0.75 },
-              { label: '100% (A4)', scale: 1.0 },
-              { label: '125%', scale: 1.25 },
-              { label: '150%', scale: 1.5 },
-            ].map((preset) => (
-              <TouchableOpacity
-                key={preset.label}
+            {/* Focal-Zoomable Animated A4 Table Sheet Container */}
+            <View style={styles.modalContentContainer} pointerEvents="none">
+              <Animated.View
                 style={[
-                  styles.presetChip,
-                  isLight && { backgroundColor: '#e2e8f0' },
-                  Math.abs(zoomScale - preset.scale) < 0.05 && styles.presetChipActive,
+                  styles.a4PageSheet,
+                  isLight && { backgroundColor: '#ffffff' },
+                  {
+                    transform: [
+                      { translateX: pan.x },
+                      { translateY: pan.y },
+                      { scale: scale },
+                    ],
+                  },
                 ]}
-                onPress={() => handleSetScale(preset.scale)}
               >
-                <Text
-                  style={[
-                    styles.presetChipText,
-                    isLight && { color: '#334155' },
-                    Math.abs(zoomScale - preset.scale) < 0.05 && styles.presetChipTextActive,
-                  ]}
-                >
-                  {preset.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-
-            <View style={{ flexDirection: 'row', gap: 4, marginLeft: 'auto' }}>
-              <TouchableOpacity
-                style={[styles.zoomControlBtn, isLight && { backgroundColor: '#e2e8f0' }]}
-                onPress={handleZoomOut}
-              >
-                <ZoomOut size={16} color={isLight ? '#0f172a' : '#f8fafc'} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.zoomControlBtn, isLight && { backgroundColor: '#e2e8f0' }]}
-                onPress={handleZoomIn}
-              >
-                <ZoomIn size={16} color={isLight ? '#0f172a' : '#f8fafc'} />
-              </TouchableOpacity>
+                {renderA4TableBody()}
+              </Animated.View>
             </View>
           </View>
-
-          {/* A4 Document Canvas Container with Pinch-to-Zoom PanResponder */}
-          <View style={{ flex: 1 }} {...panResponder.panHandlers}>
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={styles.zoomCanvasContent}
-              showsVerticalScrollIndicator={true}
-              scrollEnabled={!isPinching}
-            >
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={true}
-                contentContainerStyle={{ padding: 16 }}
-                scrollEnabled={!isPinching}
-              >
-                <View
-                  style={[
-                    styles.a4PageSheet,
-                    isLight && { backgroundColor: '#ffffff' },
-                    { transform: [{ scale: zoomScale }] },
-                  ]}
-                >
-                  {renderA4TableBody()}
-                </View>
-              </ScrollView>
-            </ScrollView>
-          </View>
-        </SafeAreaView>
-      </Modal>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -475,12 +546,14 @@ function FlowchartTreeRenderer({ text, theme = 'dark' }) {
 
 /**
  * Enhanced MarkdownRenderer component
- * Renders Markdown headers, synchronized grid tables, bullet lists, blockquotes, and visual Flowchart Decision Trees.
+ * Renders Markdown headers, synchronized grid tables, bullet lists, blockquotes, visual Flowchart Decision Trees,
+ * and high-resolution zoomable medical diagram images.
+ * Fully memoized for 60fps/120fps smooth scrolling in large question lists.
  */
-export default function MarkdownRenderer({ content, textStyle, theme = 'dark', style }) {
-  if (!content) return null;
+const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, textStyle, theme = 'dark', style, explanationImage }) {
+  if (!content && !explanationImage) return null;
 
-  const blocks = parseMarkdownBlocks(content);
+  const blocks = React.useMemo(() => parseMarkdownBlocks(content || '', explanationImage), [content, explanationImage]);
   const defaultTextColor = theme === 'light' ? '#1e293b' : '#cbd5e1';
 
   return (
@@ -491,6 +564,17 @@ export default function MarkdownRenderer({ content, textStyle, theme = 'dark', s
             <Text key={index} style={[styles.heading, headingStyle(block.level, theme)]}>
               {block.text}
             </Text>
+          );
+        }
+
+        if (block.type === 'image') {
+          return (
+            <ZoomableImageCard
+              key={index}
+              uri={block.url}
+              caption={block.alt || 'Explanation Diagram'}
+              theme={theme}
+            />
           );
         }
 
@@ -535,9 +619,11 @@ export default function MarkdownRenderer({ content, textStyle, theme = 'dark', s
                     ) : (
                       <View style={styles.bulletDot} />
                     )}
-                    <Text style={[styles.paragraphText, { color: defaultTextColor }, textStyle, { flex: 1 }]}>
-                      {renderFormattedInlineText(textVal, theme)}
-                    </Text>
+                    <View style={{ flex: 1, flexShrink: 1, minWidth: 0 }}>
+                      <Text style={[styles.paragraphText, { color: defaultTextColor }, textStyle]}>
+                        {renderFormattedInlineText(textVal, theme)}
+                      </Text>
+                    </View>
                   </View>
                 );
               })}
@@ -547,27 +633,73 @@ export default function MarkdownRenderer({ content, textStyle, theme = 'dark', s
 
         // Default Paragraph
         return (
-          <Text key={index} style={[styles.paragraphText, { color: defaultTextColor }, textStyle]}>
+          <Text
+            key={index}
+            style={[styles.paragraphText, { color: defaultTextColor }, textStyle]}
+          >
             {renderFormattedInlineText(block.text, theme)}
           </Text>
         );
       })}
     </View>
   );
-}
+});
 
-function parseMarkdownBlocks(text) {
-  if (!text) return [];
+function parseMarkdownBlocks(text, explanationImage = null) {
+  if (!text && !explanationImage) return [];
 
-  const lines = text.split('\n');
+  let rawText = text || '';
+  const imgUrl = (typeof explanationImage === 'string' && explanationImage.trim()) ? explanationImage.trim() : null;
+
+  // Pre-process ((pic)) tags in text:
+  // If image URL is provided, replace ((pic)) with a distinct markdown image tag line
+  if (imgUrl) {
+    if (rawText.includes('((pic))')) {
+      rawText = rawText.replace(/\(\(pic\)\)/g, `\n\n![Explanation Diagram](${imgUrl})\n\n`);
+    }
+  } else {
+    // If no image URL is provided, strip ((pic)) cleanly
+    rawText = rawText.replace(/\(\(pic\)\)/g, '');
+  }
+
+  const lines = rawText.split('\n');
   const blocks = [];
 
   let currentTable = null;
   let currentList = null;
   let currentFlowchart = [];
+  let hasRenderedImage = false;
 
   lines.forEach((line) => {
     const trimmed = line.trim();
+
+    // Check for Markdown Image syntax: ![alt](url)
+    const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
+    if (imgMatch) {
+      if (currentTable) {
+        blocks.push(currentTable);
+        currentTable = null;
+      }
+      if (currentList) {
+        blocks.push(currentList);
+        currentList = null;
+      }
+      if (currentFlowchart.length > 0) {
+        blocks.push({
+          type: 'flowchart',
+          text: currentFlowchart.join('\n'),
+        });
+        currentFlowchart = [];
+      }
+
+      blocks.push({
+        type: 'image',
+        alt: imgMatch[1] || 'Explanation Diagram',
+        url: imgMatch[2].trim(),
+      });
+      hasRenderedImage = true;
+      return;
+    }
 
     const isFlowLine =
       trimmed === '↓' ||
@@ -657,8 +789,9 @@ function parseMarkdownBlocks(text) {
       return;
     }
 
-    if (/^[\-\*]\s+/.test(trimmed)) {
-      const itemText = trimmed.replace(/^[\-\*]\s+/, '');
+    const isBulletLine = /^[•\-\*\u2022]\s*/.test(trimmed);
+    if (isBulletLine) {
+      const itemText = trimmed.replace(/^[•\-\*\u2022]\s*/, '');
       if (!currentList || currentList.listType === 'numbered') {
         if (currentList) blocks.push(currentList);
         currentList = {
@@ -702,8 +835,19 @@ function parseMarkdownBlocks(text) {
   if (currentTable) blocks.push(currentTable);
   if (currentList) blocks.push(currentList);
 
+  // If explanationImage was provided but neither ((pic)) nor ![...] was in the raw text,
+  // append the image block cleanly at the bottom of the explanation!
+  if (imgUrl && !hasRenderedImage) {
+    blocks.push({
+      type: 'image',
+      alt: 'Explanation Diagram',
+      url: imgUrl,
+    });
+  }
+
   return blocks;
 }
+
 
 function cleanLatexFormulas(rawStr) {
   if (!rawStr) return '';
@@ -748,13 +892,12 @@ function renderFormattedInlineText(text, theme = 'dark') {
 
     if (part.startsWith('**') && part.endsWith('**')) {
       const boldContent = part.slice(2, -2);
-      const isKeyLabel = boldContent.endsWith(':');
       return (
         <Text
           key={idx}
           style={{
             fontWeight: '700',
-            color: isKeyLabel ? (isLight ? '#7c3aed' : '#c084fc') : (isLight ? '#0f172a' : '#f8fafc'),
+            color: isLight ? '#0f172a' : '#f8fafc',
           }}
         >
           {cleanLatexFormulas(boldContent)}
@@ -783,17 +926,7 @@ function renderFormattedInlineText(text, theme = 'dark') {
       );
     }
 
-    const kvMatch = part.match(/^([A-Z][A-Za-z0-9\s-]{1,25}:)(\s+.*)$/);
-    if (kvMatch) {
-      return (
-        <Text key={idx}>
-          <Text style={{ fontWeight: '700', color: isLight ? '#7c3aed' : '#c084fc' }}>{kvMatch[1]}</Text>
-          <Text style={{ color: isLight ? '#1e293b' : '#cbd5e1' }}>{cleanLatexFormulas(kvMatch[2])}</Text>
-        </Text>
-      );
-    }
-
-    return <Text key={idx} style={{ color: isLight ? '#1e293b' : '#cbd5e1' }}>{part}</Text>;
+    return cleanLatexFormulas(part);
   });
 }
 
@@ -822,9 +955,11 @@ const styles = StyleSheet.create({
   paragraphText: {
     fontSize: 13,
     color: '#cbd5e1',
-    lineHeight: 19,
+    lineHeight: 20,
     marginVertical: 3,
     flexShrink: 1,
+    width: '100%',
+    textAlign: 'left',
   },
 
   badgeHeader: {
@@ -929,7 +1064,8 @@ const styles = StyleSheet.create({
   flowDetailNoteText: {
     fontSize: 12,
     color: '#cbd5e1',
-    lineHeight: 17,
+    lineHeight: 18,
+    textAlign: 'left',
   },
   flowGeneralText: {
     fontSize: 12,
@@ -1018,9 +1154,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   tableCell: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
     justifyContent: 'center',
+    flexShrink: 1,
   },
   cellRightBorder: {
     borderRightWidth: 1,
@@ -1028,103 +1165,48 @@ const styles = StyleSheet.create({
   },
   tableHeaderCell: {
     backgroundColor: '#1e293b',
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   tableHeaderText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '800',
     color: '#818cf8',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   tableCellText: {
-    fontSize: 12,
+    fontSize: 11.5,
     color: '#e2e8f0',
-    lineHeight: 17,
+    lineHeight: 16,
   },
 
-  zoomModalContainer: {
+  tableModalBackdrop: {
     flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContentContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  inlineTableCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginVertical: 6,
+  },
+  inlineTableCardDark: {
     backgroundColor: '#0f172a',
+    borderColor: '#334155',
+    elevation: 2,
   },
-  zoomModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#1e293b',
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  zoomModalTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#f8fafc',
-  },
-  zoomModalSubtitle: {
-    fontSize: 11,
-    color: '#94a3b8',
-    marginTop: 2,
-  },
-  zoomPresetToolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-    gap: 6,
-  },
-  presetLabel: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginRight: 4,
-    fontWeight: '600',
-  },
-  presetChip: {
-    backgroundColor: '#334155',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  presetChipActive: {
-    backgroundColor: '#6366f1',
-  },
-  presetChipText: {
-    fontSize: 11,
-    color: '#cbd5e1',
-    fontWeight: '600',
-  },
-  presetChipTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  zoomControlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  zoomControlBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: '#334155',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  zoomCloseBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#ef4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 4,
-  },
-  zoomCanvasContent: {
-    paddingVertical: 20,
-    alignItems: 'flex-start',
+  inlineTableCardLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    elevation: 1,
   },
 
   blockquoteContainer: {
@@ -1137,16 +1219,21 @@ const styles = StyleSheet.create({
     marginVertical: 6,
     borderWidth: 1,
     borderColor: 'rgba(168, 85, 247, 0.25)',
+    flexShrink: 1,
+    width: '100%',
   },
   blockquoteText: {
     fontSize: 13,
     color: '#f8fafc',
-    lineHeight: 19,
+    lineHeight: 20,
+    textAlign: 'left',
+    flexShrink: 1,
   },
 
   listContainer: {
     marginVertical: 4,
     width: '100%',
+    flexShrink: 1,
   },
   listItem: {
     flexDirection: 'row',
@@ -1154,6 +1241,7 @@ const styles = StyleSheet.create({
     marginVertical: 3,
     width: '100%',
     flexShrink: 1,
+    paddingRight: 6,
   },
   bulletDot: {
     width: 6,
@@ -1179,3 +1267,5 @@ const styles = StyleSheet.create({
     color: '#818cf8',
   },
 });
+
+export default MarkdownRenderer;

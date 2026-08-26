@@ -58,13 +58,18 @@ function verifyToken(token) {
 
   const [encodedHeader, encodedPayload, signature] = parts;
 
+  if (!JWT_SECRET) return null;
+
   const expectedSignature = crypto
     .createHmac('sha256', JWT_SECRET)
     .update(`${encodedHeader}.${encodedPayload}`)
     .digest('base64url');
 
-  if (signature !== expectedSignature) {
-    return null; // Invalid signature
+  const sigBuf = Buffer.from(signature, 'utf8');
+  const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    return null; // Invalid signature (timing-safe check)
   }
 
   try {

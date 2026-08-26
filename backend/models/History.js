@@ -9,7 +9,14 @@ const QuestionAttemptSchema = new mongoose.Schema({
   correctAnswerLetter: { type: String, default: 'A' },
   correctOptionIndex: { type: Number, default: 0 },
   isCorrect: { type: Boolean, default: false },
-  explanation: { type: String, default: '' }
+  explanation: { type: String, default: '' },
+  questionImage: { type: String, default: null },
+  questionpic: { type: String, default: null },
+  image: { type: String, default: null },
+  cloudanary_link: { type: String, default: null },
+  cloudinary_link: { type: String, default: null },
+  explanationPic: { type: String, default: null },
+  explanationImage: { type: String, default: null }
 });
 
 const HistorySchema = new mongoose.Schema({
@@ -26,5 +33,9 @@ const HistorySchema = new mongoose.Schema({
   questionBreakdown: [QuestionAttemptSchema],
   completedAt: { type: Date, default: Date.now }
 });
+
+// Compound index for instant user-specific history sorting & retrieval
+HistorySchema.index({ userId: 1, completedAt: -1 });
+HistorySchema.index({ completedAt: -1 });
 
 module.exports = mongoose.model('History', HistorySchema);

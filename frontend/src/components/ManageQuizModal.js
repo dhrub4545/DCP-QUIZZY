@@ -14,6 +14,7 @@ import {
 import { X, Plus, Edit2, Trash2, Check, HelpCircle, BookOpen, Layers } from 'lucide-react-native';
 import { addQuestionApi, updateQuestionApi, deleteQuestionApi, fetchQuizById } from '../services/api';
 import MarkdownRenderer from './MarkdownRenderer';
+import ZoomableImageCard from './ZoomableImageCard';
 
 export default function ManageQuizModal({ visible, quiz, onClose, onQuizUpdated }) {
   const [currentQuiz, setCurrentQuiz] = useState(quiz);
@@ -254,6 +255,16 @@ export default function ManageQuizModal({ visible, quiz, onClose, onQuizUpdated 
 
                     <Text style={styles.qText}>{item.questionText}</Text>
 
+                    {/* Question Image (displayed below question and before options) */}
+                    {(item.questionImage || item.questionpic || item.image || item.question_image) ? (
+                      <ZoomableImageCard
+                        uri={item.questionImage || item.questionpic || item.image || item.question_image}
+                        caption={`Question Diagram`}
+                        theme="dark"
+                        style={{ marginTop: 8, marginBottom: 12 }}
+                      />
+                    ) : null}
+
                     {/* Options Preview */}
                     <View style={styles.optionsList}>
                       {item.options?.map((opt, oIdx) => {
@@ -282,7 +293,11 @@ export default function ManageQuizModal({ visible, quiz, onClose, onQuizUpdated 
                     {item.explanation ? (
                       <View style={styles.expBox}>
                         <Text style={styles.expTitle}>Explanation:</Text>
-                        <MarkdownRenderer content={item.explanation} />
+                        <MarkdownRenderer
+                          content={item.explanation}
+                          explanationImage={item.cloudanary_link || item.cloudinary_link || item.explanationPic || item.explanationImage}
+                          theme="dark"
+                        />
                       </View>
                     ) : null}
                   </View>

@@ -1,26 +1,66 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
+const Quiz = require('./models/Quiz');
 const quizRoutes = require('./routes/quizRoutes');
 const historyRoutes = require('./routes/historyRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const authRoutes = require('./routes/authRoutes');
 const authMiddleware = require('./middleware/authMiddleware');
 
-// Connect to MongoDB
-connectDB();
+// Connect to MongoDB and run topic indexing synchronization
+connectDB().then(() => {
+  syncQuizTopics();
+});
+
+// Startup helper: ensure all existing quizzes have their lightweight `topics` field indexed
+async function syncQuizTopics() {
+  try {
+    const quizzesNeedingSync = await Quiz.find({
+      $or: [{ topics: { $exists: false } }, { topics: { $size: 0 } }]
+    });
+    if (quizzesNeedingSync.length > 0) {
+      for (const q of quizzesNeedingSync) {
+        if (q.questions && q.questions.length > 0) {
+          const tSet = new Set();
+          q.questions.forEach(item => {
+            if (item.topic && typeof item.topic === 'string' && item.topic.trim()) {
+              tSet.add(item.topic.trim());
+            }
+          });
+          q.topics = Array.from(tSet);
+          q.questionCount = q.questions.length;
+          await q.save();
+        }
+      }
+      console.log(`[Startup] Synced topics for ${quizzesNeedingSync.length} quiz record(s).`);
+    }
+  } catch (err) {
+    console.warn('[Startup] Topic sync notice:', err.message);
+  }
+}
 
 const app = express();
 
 // Trust proxy for accurate IP tracking if behind reverse proxy
 app.set('trust proxy', 1);
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+// Security & Performance Middleware
+app.use(helmet());
+app.use(compression());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Payload parsing with safe limits (prevents payload DoS)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Root Endpoint
 app.get('/', (req, res) => {
@@ -41,7 +81,7 @@ app.get('/', (req, res) => {
 
 // Health Check Route
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', message: 'Backend service is healthy' });
+  res.status(200).json({ status: 'OK', message: 'Backend service is healthy', timestamp: new Date().toISOString() });
 });
 
 // 1. Strict Auth Rate Limiter (Block IP after 10 attempts per 15 minutes)
@@ -56,7 +96,19 @@ const authLimiter = rateLimit({
   }
 });
 
-// 2. General API Rate Limiter (Max 300 requests per 15 minutes)
+// 2. AI Endpoint Rate Limiter (Max 20 AI calls per minute per IP)
+const aiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many AI requests. Please wait a moment before trying again.'
+  }
+});
+
+// 3. General API Rate Limiter (Max 300 requests per 15 minutes)
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
@@ -71,6 +123,7 @@ const apiLimiter = rateLimit({
 // Apply Rate Limiters
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/ai/', aiLimiter);
 app.use('/api/', apiLimiter);
 
 // JWT Security Verification Middleware

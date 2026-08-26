@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Clock, ArrowLeft, ArrowRight, CheckCircle, HelpCircle, X } from 'lucide-react-native';
 import { fetchQuizById } from '../services/api';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import ZoomableImageCard from '../components/ZoomableImageCard';
 
 export default function TestScreen({ route, navigation }) {
   const {
@@ -166,6 +167,8 @@ export default function TestScreen({ route, navigation }) {
   };
 
   const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
+  const questionPicUrl = currentQ?.questionImage || currentQ?.questionpic || currentQ?.questionPic || currentQ?.image || currentQ?.question_image;
+  const explanationPicUrl = currentQ?.cloudanary_link || currentQ?.cloudinary_link || currentQ?.explanationPic || currentQ?.explanationImage || currentQ?.explanation_pic;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -200,6 +203,7 @@ export default function TestScreen({ route, navigation }) {
 
       {/* Question Content Scroll - Compact Space Optimized */}
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Question Card */}
         <View style={styles.questionCard}>
           <View style={styles.qNumBadge}>
             <Text style={styles.qNumBadgeText}>Q{currentIndex + 1}</Text>
@@ -207,6 +211,16 @@ export default function TestScreen({ route, navigation }) {
           <Text style={styles.questionText}>
             {currentQ?.questionText || 'Question text unavailable'}
           </Text>
+
+          {/* Question Image (displayed below question text and before options) */}
+          {questionPicUrl ? (
+            <ZoomableImageCard
+              uri={questionPicUrl}
+              caption={`Question ${currentIndex + 1} Diagram`}
+              theme="dark"
+              style={{ marginTop: 10, marginBottom: 2 }}
+            />
+          ) : null}
         </View>
 
         {/* Compact Options List */}
@@ -268,7 +282,11 @@ export default function TestScreen({ route, navigation }) {
             {showExplanation && (
               <View style={styles.expBox}>
                 <Text style={styles.expTitle}>Explanation:</Text>
-                <MarkdownRenderer content={currentQ.explanation} />
+                <MarkdownRenderer
+                  content={currentQ.explanation}
+                  explanationImage={explanationPicUrl}
+                  theme="dark"
+                />
               </View>
             )}
           </View>

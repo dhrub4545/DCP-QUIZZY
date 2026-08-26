@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -10,23 +10,90 @@ import {
   Alert,
   RefreshControl,
   Modal,
-  ScrollView,
+  Animated,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Clock, Award, CheckCircle2, XCircle, Trash2, Calendar, ChevronRight, X, Sparkles, Lightbulb, MessageSquare } from 'lucide-react-native';
-import { fetchHistoryApi, deleteHistoryApi, fetchAiExplanationApi } from '../services/api';
+import {
+  ArrowLeft,
+  Clock,
+  Award,
+  CheckCircle2,
+  Trash2,
+  Calendar,
+  X,
+  Sparkles,
+  Lightbulb,
+  MessageSquare,
+} from 'lucide-react-native';
+import {
+  fetchHistoryApi,
+  fetchHistoryByIdApi,
+  deleteHistoryApi,
+  fetchAiExplanationApi,
+} from '../services/api';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import ZoomableImageCard from '../components/ZoomableImageCard';
 import AiChatModal from '../components/AiChatModal';
 import BottomTabBar from '../components/BottomTabBar';
 
+// ----------------------------------------------------
+// Card Loading Skeleton Animation Component
+// ----------------------------------------------------
+const HistoryCardSkeleton = () => {
+  const pulseAnim = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.9,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.35,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
+
+  return (
+    <Animated.View style={[styles.card, styles.skeletonCard, { opacity: pulseAnim }]}>
+      <View style={styles.cardHeader}>
+        <View style={styles.skeletonBadge} />
+        <View style={styles.skeletonDate} />
+      </View>
+      <View style={styles.skeletonTitle} />
+      <View style={styles.skeletonSubject} />
+      <View style={styles.statsRow}>
+        <View style={styles.skeletonChip} />
+        <View style={styles.skeletonChip} />
+      </View>
+    </Animated.View>
+  );
+};
+
 export default function HistoryScreen({ navigation }) {
+  // Paginated History State
   const [historyList, setHistoryList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const isLoadingRef = useRef(false);
 
   // Detail Modal State
   const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
 
   // AI Explanation & Chat states
   const [aiExplanations, setAiExplanations] = useState({});
@@ -36,32 +103,59 @@ export default function HistoryScreen({ navigation }) {
   const [chatModalVisible, setChatModalVisible] = useState(false);
   const [activeQuestionForChat, setActiveQuestionForChat] = useState(null);
 
-  const loadHistory = async (showSpinner = false) => {
+  // Load Paginated History
+  const loadHistory = async (pageToFetch = 1, isRefresh = false) => {
+    if (isLoadingRef.current) return;
     try {
-      if (showSpinner) {
+      isLoadingRef.current = true;
+      if (pageToFetch === 1 && !isRefresh) {
         setLoading(true);
+      } else if (pageToFetch > 1) {
+        setLoadingMore(true);
       }
-      const data = await fetchHistoryApi();
-      if (data && data.history) {
-        setHistoryList(data.history);
+
+      const data = await fetchHistoryApi(pageToFetch, 15);
+      if (data && Array.isArray(data.history)) {
+        if (pageToFetch === 1) {
+          setHistoryList(data.history);
+        } else {
+          setHistoryList((prev) => {
+            const existingIds = new Set(prev.map((item) => item._id));
+            const newItems = data.history.filter((item) => !existingIds.has(item._id));
+            return [...prev, ...newItems];
+          });
+        }
+        setPage(pageToFetch);
+        setHasMore(Boolean(data.hasMore));
+        if (data.total !== undefined) {
+          setTotalCount(data.total);
+        }
       }
     } catch (err) {
       console.warn('Error loading history:', err.message);
     } finally {
+      isLoadingRef.current = false;
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
-      loadHistory(historyList.length === 0);
+      loadHistory(1);
     }, [])
   );
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadHistory();
+    loadHistory(1, true);
+  };
+
+  const handleLoadMore = () => {
+    if (!loading && !loadingMore && hasMore && !isLoadingRef.current) {
+      loadHistory(page + 1);
+    }
   };
 
   const handleDeleteAttempt = (id, title) => {
@@ -75,23 +169,42 @@ export default function HistoryScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              setLoading(true);
+              setHistoryList((prev) => prev.filter((item) => item._id !== id));
               await deleteHistoryApi(id);
-              loadHistory();
+              loadHistory(1);
             } catch (err) {
               Alert.alert('Delete Error', err.message || 'Failed to delete attempt.');
-              setLoading(false);
+              loadHistory(1);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
 
-  const handleOpenDetail = (attempt) => {
+  const handleOpenDetail = async (attempt) => {
     setSelectedAttempt(attempt);
     setAiExplanations({});
     setModalVisible(true);
+
+    // If attempt has full breakdown already, no additional fetch needed
+    if (attempt.questionBreakdown && attempt.questionBreakdown.length > 0) {
+      setModalLoading(false);
+      return;
+    }
+
+    // Lazy load full question breakdown by attempt ID
+    try {
+      setModalLoading(true);
+      const res = await fetchHistoryByIdApi(attempt._id);
+      if (res && res.history) {
+        setSelectedAttempt(res.history);
+      }
+    } catch (err) {
+      console.error('Error fetching full attempt details:', err);
+    } finally {
+      setModalLoading(false);
+    }
   };
 
   const handleGenerateAiExplanation = async (q, idx) => {
@@ -102,13 +215,13 @@ export default function HistoryScreen({ navigation }) {
         questionText: q.questionText,
         options: q.options,
         correctAnswerLetter: q.correctAnswerLetter || 'A',
-        explanation: q.explanation
+        explanation: q.explanation,
       });
 
       if (res && res.explanation) {
         setAiExplanations((prev) => ({
           ...prev,
-          [idx]: res.explanation
+          [idx]: res.explanation,
         }));
       }
     } catch (err) {
@@ -124,7 +237,7 @@ export default function HistoryScreen({ navigation }) {
       options: q.options,
       correctAnswerLetter: q.correctAnswerLetter || 'A',
       userLetter: q.userLetter || 'Not answered',
-      explanation: q.explanation || ''
+      explanation: q.explanation || '',
     });
     setChatModalVisible(true);
   };
@@ -137,16 +250,161 @@ export default function HistoryScreen({ navigation }) {
   };
 
   const getScoreBadge = (percent) => {
-    if (percent >= 80) return { title: `${percent}%`, color: '#34d399', bg: 'rgba(16, 185, 129, 0.2)', border: 'rgba(16, 185, 129, 0.4)' };
-    if (percent >= 50) return { title: `${percent}%`, color: '#818cf8', bg: 'rgba(99, 102, 241, 0.2)', border: 'rgba(99, 102, 241, 0.4)' };
-    return { title: `${percent}%`, color: '#fb7185', bg: 'rgba(244, 63, 94, 0.2)', border: 'rgba(244, 63, 94, 0.4)' };
+    if (percent >= 80)
+      return {
+        title: `${percent}%`,
+        color: '#34d399',
+        bg: 'rgba(16, 185, 129, 0.2)',
+        border: 'rgba(16, 185, 129, 0.4)',
+      };
+    if (percent >= 50)
+      return {
+        title: `${percent}%`,
+        color: '#818cf8',
+        bg: 'rgba(99, 102, 241, 0.2)',
+        border: 'rgba(99, 102, 241, 0.4)',
+      };
+    return {
+      title: `${percent}%`,
+      color: '#fb7185',
+      bg: 'rgba(244, 63, 94, 0.2)',
+      border: 'rgba(244, 63, 94, 0.4)',
+    };
+  };
+
+  // Review Question Item in Detail Modal
+  const renderReviewQuestionItem = ({ item: q, index: idx }) => {
+    const questionPicUrl =
+      q.questionImage || q.questionpic || q.image || q.question_image;
+    const explanationPicUrl =
+      q.cloudanary_link ||
+      q.cloudinary_link ||
+      q.explanationPic ||
+      q.explanationImage ||
+      q.explanation_pic;
+
+    return (
+      <View style={styles.reviewCard}>
+        <View style={styles.reviewCardHeader}>
+          <View
+            style={[
+              styles.statusDot,
+              { backgroundColor: q.isCorrect ? '#10b981' : '#ef4444' },
+            ]}
+          />
+          <Text style={styles.reviewQTitle}>
+            Q{idx + 1}. {q.questionText}
+          </Text>
+        </View>
+
+        {/* Question Image */}
+        {questionPicUrl ? (
+          <ZoomableImageCard
+            uri={questionPicUrl}
+            caption={`Question ${idx + 1} Diagram`}
+            theme="dark"
+            style={{ marginTop: 8, marginBottom: 12 }}
+          />
+        ) : null}
+
+        <View style={styles.reviewOptionsList}>
+          {q.options?.map((opt, optIdx) => {
+            const letter = ['A', 'B', 'C', 'D', 'E', 'F'][optIdx];
+            const isUserChoice =
+              q.userLetter === letter || q.userOptionIndex === optIdx;
+            const isAnswer =
+              q.correctAnswerLetter === letter ||
+              q.correctOptionIndex === optIdx;
+
+            return (
+              <View
+                key={optIdx}
+                style={[
+                  styles.reviewOptionRow,
+                  isAnswer && styles.reviewOptionAnswer,
+                  isUserChoice && !isAnswer && styles.reviewOptionWrong,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.optLetter,
+                    isAnswer && { color: '#10b981', fontWeight: '700' },
+                  ]}
+                >
+                  {letter}.
+                </Text>
+                <Text style={styles.optText}>{opt}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {q.explanation ? (
+          <View style={styles.expBox}>
+            <Text style={styles.expTitle}>Printed Explanation:</Text>
+            <MarkdownRenderer
+              content={q.explanation}
+              explanationImage={explanationPicUrl}
+              theme="dark"
+            />
+          </View>
+        ) : null}
+
+        {/* AI Generated Explanation Card */}
+        {aiExplanations[idx] && (
+          <View style={styles.aiExpBox}>
+            <View style={styles.aiExpHeader}>
+              <View style={styles.aiBadge}>
+                <Sparkles size={11} color="#ffffff" />
+                <Text style={styles.aiBadgeText}>GEMINI 3.6 FLASH AI</Text>
+              </View>
+              <Text style={styles.aiExpTitle}>In-Depth Explanation</Text>
+            </View>
+            <MarkdownRenderer content={aiExplanations[idx]} />
+          </View>
+        )}
+
+        {/* AI Action Buttons Row */}
+        <View style={styles.aiBtnRow}>
+          <TouchableOpacity
+            style={styles.aiExplainBtn}
+            onPress={() => handleGenerateAiExplanation(q, idx)}
+            disabled={loadingAiIdx === idx}
+          >
+            {loadingAiIdx === idx ? (
+              <ActivityIndicator size="small" color="#c084fc" />
+            ) : (
+              <>
+                <Lightbulb size={14} color="#c084fc" />
+                <Text style={styles.aiExplainBtnText}>
+                  {aiExplanations[idx]
+                    ? 'Regenerate AI Explanation'
+                    : 'Generate AI Explanation'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.aiChatBtn}
+            onPress={() => handleOpenAiChat(q)}
+          >
+            <MessageSquare size={14} color="#ffffff" />
+            <Text style={styles.aiChatBtnText}>Chat with AI Tutor</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   };
 
   return (
     <SafeAreaView style={styles.container}>
       {/* Header Bar */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+        >
           <ArrowLeft size={22} color="#f8fafc" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Test Attempt History</Text>
@@ -155,16 +413,19 @@ export default function HistoryScreen({ navigation }) {
 
       {/* Body */}
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#6366f1" />
-          <Text style={styles.loadingText}>Loading history...</Text>
+        <View style={styles.listPadding}>
+          <HistoryCardSkeleton />
+          <HistoryCardSkeleton />
+          <HistoryCardSkeleton />
+          <HistoryCardSkeleton />
         </View>
       ) : historyList.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Clock size={56} color="#475569" />
           <Text style={styles.emptyTitle}>No Test History Yet</Text>
           <Text style={styles.emptySubtitle}>
-            Complete your first test to see your performance history and detailed scorecards here!
+            Complete your first test to see your performance history and detailed
+            scorecards here!
           </Text>
         </View>
       ) : (
@@ -172,13 +433,44 @@ export default function HistoryScreen({ navigation }) {
           data={historyList}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listPadding}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.4}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#6366f1']} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#6366f1']}
+            />
+          }
+          ListFooterComponent={
+            <View>
+              {loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="small" color="#818cf8" />
+                  <Text style={styles.footerLoaderText}>
+                    Loading more test history...
+                  </Text>
+                </View>
+              ) : !hasMore && historyList.length >= 8 ? (
+                <View style={styles.endHistoryFooter}>
+                  <Text style={styles.endHistoryText}>
+                    All {totalCount || historyList.length} test attempts loaded
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           }
           renderItem={({ item }) => {
             const badge = getScoreBadge(item.accuracyPercentage || 0);
-            const dateStr = item.completedAt ? new Date(item.completedAt).toLocaleDateString() : '';
-            const timeStr = item.completedAt ? new Date(item.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const dateStr = item.completedAt
+              ? new Date(item.completedAt).toLocaleDateString()
+              : '';
+            const timeStr = item.completedAt
+              ? new Date(item.completedAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : '';
 
             return (
               <TouchableOpacity
@@ -187,35 +479,61 @@ export default function HistoryScreen({ navigation }) {
                 onPress={() => handleOpenDetail(item)}
               >
                 <View style={styles.cardHeader}>
-                  <View style={[styles.badge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                  <View
+                    style={[
+                      styles.badge,
+                      {
+                        backgroundColor: badge.bg,
+                        borderColor: badge.border,
+                      },
+                    ]}
+                  >
                     <Award size={13} color={badge.color} />
-                    <Text style={[styles.badgeText, { color: badge.color }]}>{badge.title}</Text>
+                    <Text style={[styles.badgeText, { color: badge.color }]}>
+                      {badge.title}
+                    </Text>
                   </View>
                   <View style={styles.dateRow}>
-                    <Calendar size={11} color="#64748b" style={{ marginRight: 4 }} />
-                    <Text style={styles.dateText}>{dateStr} • {timeStr}</Text>
+                    <Calendar
+                      size={11}
+                      color="#64748b"
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text style={styles.dateText}>
+                      {dateStr} • {timeStr}
+                    </Text>
                   </View>
                 </View>
 
-                <Text style={styles.quizTitle} numberOfLines={1}>{item.quizTitle}</Text>
-                <Text style={styles.subjectText}>{item.subject || 'General'}</Text>
+                <Text style={styles.quizTitle} numberOfLines={1}>
+                  {item.quizTitle}
+                </Text>
+                <Text style={styles.subjectText}>
+                  {item.subject || 'General'}
+                </Text>
 
                 <View style={styles.statsRow}>
                   <View style={styles.statChip}>
                     <CheckCircle2 size={12.5} color="#10b981" />
-                    <Text style={styles.statChipText}>{item.correctCount} / {item.totalQuestions} Correct</Text>
+                    <Text style={styles.statChipText}>
+                      {item.correctCount} / {item.totalQuestions} Correct
+                    </Text>
                   </View>
 
                   <View style={styles.statChip}>
                     <Clock size={12.5} color="#818cf8" />
-                    <Text style={styles.statChipText}>{formatTime(item.timeTakenSeconds)}</Text>
+                    <Text style={styles.statChipText}>
+                      {formatTime(item.timeTakenSeconds)}
+                    </Text>
                   </View>
 
                   <View style={{ flex: 1 }} />
 
                   <TouchableOpacity
                     style={styles.deleteBtn}
-                    onPress={() => handleDeleteAttempt(item._id, item.quizTitle)}
+                    onPress={() =>
+                      handleDeleteAttempt(item._id, item.quizTitle)
+                    }
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     <Trash2 size={14} color="#ef4444" />
@@ -243,8 +561,13 @@ export default function HistoryScreen({ navigation }) {
         }}
       />
 
-      {/* Attempt Details Review Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent={false} onRequestClose={() => setModalVisible(false)}>
+      {/* Attempt Details Review Modal with Virtualized Lazy Rendering */}
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setModalVisible(false)}
+      >
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <View style={{ flex: 1 }}>
@@ -252,97 +575,38 @@ export default function HistoryScreen({ navigation }) {
                 {selectedAttempt?.quizTitle || 'Attempt Review'}
               </Text>
               <Text style={styles.modalSub}>
-                Score: {selectedAttempt?.accuracyPercentage}% • {selectedAttempt?.correctCount}/{selectedAttempt?.totalQuestions} Correct
+                Score: {selectedAttempt?.accuracyPercentage}% •{' '}
+                {selectedAttempt?.correctCount}/{selectedAttempt?.totalQuestions}{' '}
+                Correct
               </Text>
             </View>
-            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setModalVisible(false)}>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setModalVisible(false)}
+            >
               <X size={24} color="#94a3b8" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={styles.modalContent}>
-            {selectedAttempt?.questionBreakdown?.map((q, idx) => (
-              <View key={idx} style={styles.reviewCard}>
-                <View style={styles.reviewCardHeader}>
-                  <View style={[styles.statusDot, { backgroundColor: q.isCorrect ? '#10b981' : '#ef4444' }]} />
-                  <Text style={styles.reviewQTitle}>Q{idx + 1}. {q.questionText}</Text>
-                </View>
-
-                <View style={styles.reviewOptionsList}>
-                  {q.options?.map((opt, optIdx) => {
-                    const letter = ['A', 'B', 'C', 'D', 'E', 'F'][optIdx];
-                    const isUserChoice = q.userLetter === letter || q.userOptionIndex === optIdx;
-                    const isAnswer = q.correctAnswerLetter === letter || q.correctOptionIndex === optIdx;
-
-                    return (
-                      <View
-                        key={optIdx}
-                        style={[
-                          styles.reviewOptionRow,
-                          isAnswer && styles.reviewOptionAnswer,
-                          isUserChoice && !isAnswer && styles.reviewOptionWrong,
-                        ]}
-                      >
-                        <Text style={[styles.optLetter, isAnswer && { color: '#10b981', fontWeight: '700' }]}>
-                          {letter}.
-                        </Text>
-                        <Text style={styles.optText}>{opt}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-
-                {q.explanation ? (
-                  <View style={styles.expBox}>
-                    <Text style={styles.expTitle}>Printed Explanation:</Text>
-                    <MarkdownRenderer content={q.explanation} />
-                  </View>
-                ) : null}
-
-                {/* AI Generated Explanation Card */}
-                {aiExplanations[idx] && (
-                  <View style={styles.aiExpBox}>
-                    <View style={styles.aiExpHeader}>
-                      <View style={styles.aiBadge}>
-                        <Sparkles size={11} color="#ffffff" />
-                        <Text style={styles.aiBadgeText}>GEMINI 3.6 FLASH AI</Text>
-                      </View>
-                      <Text style={styles.aiExpTitle}>In-Depth Explanation</Text>
-                    </View>
-                    <MarkdownRenderer content={aiExplanations[idx]} />
-                  </View>
-                )}
-
-                {/* AI Action Buttons Row */}
-                <View style={styles.aiBtnRow}>
-                  <TouchableOpacity
-                    style={styles.aiExplainBtn}
-                    onPress={() => handleGenerateAiExplanation(q, idx)}
-                    disabled={loadingAiIdx === idx}
-                  >
-                    {loadingAiIdx === idx ? (
-                      <ActivityIndicator size="small" color="#c084fc" />
-                    ) : (
-                      <>
-                        <Lightbulb size={14} color="#c084fc" />
-                        <Text style={styles.aiExplainBtnText}>
-                          {aiExplanations[idx] ? 'Regenerate AI Explanation' : 'Generate AI Explanation'}
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.aiChatBtn}
-                    onPress={() => handleOpenAiChat(q)}
-                  >
-                    <MessageSquare size={14} color="#ffffff" />
-                    <Text style={styles.aiChatBtnText}>Chat with AI Tutor</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
+          {modalLoading ? (
+            <View style={styles.modalCenterContainer}>
+              <ActivityIndicator size="large" color="#6366f1" />
+              <Text style={styles.modalLoadingText}>
+                Loading question breakdown...
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={selectedAttempt?.questionBreakdown || []}
+              keyExtractor={(_, idx) => `review_q_${idx}`}
+              contentContainerStyle={styles.modalContent}
+              initialNumToRender={6}
+              maxToRenderPerBatch={6}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === 'android'}
+              renderItem={renderReviewQuestionItem}
+            />
+          )}
         </SafeAreaView>
       </Modal>
 
@@ -379,16 +643,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#f8fafc',
   },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#94a3b8',
-    fontSize: 14,
-  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -420,6 +674,44 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#334155',
+  },
+  skeletonCard: {
+    backgroundColor: '#1e293b',
+    borderColor: '#334155',
+  },
+  skeletonBadge: {
+    width: 65,
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: '#334155',
+  },
+  skeletonDate: {
+    width: 110,
+    height: 14,
+    borderRadius: 4,
+    backgroundColor: '#334155',
+  },
+  skeletonTitle: {
+    width: '80%',
+    height: 18,
+    borderRadius: 4,
+    backgroundColor: '#334155',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  skeletonSubject: {
+    width: '45%',
+    height: 13,
+    borderRadius: 4,
+    backgroundColor: '#334155',
+    marginBottom: 10,
+  },
+  skeletonChip: {
+    width: 100,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: '#334155',
+    marginRight: 6,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -488,6 +780,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
+  footerLoader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  footerLoaderText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#818cf8',
+  },
+  endHistoryFooter: {
+    alignItems: 'center',
+    paddingVertical: 18,
+  },
+  endHistoryText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -514,6 +827,17 @@ const styles = StyleSheet.create({
   },
   modalCloseBtn: {
     padding: 4,
+  },
+  modalCenterContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalLoadingText: {
+    marginTop: 10,
+    fontSize: 13.5,
+    color: '#94a3b8',
+    fontWeight: '500',
   },
   modalContent: {
     paddingHorizontal: 6,

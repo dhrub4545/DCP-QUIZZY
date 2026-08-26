@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Award, CheckCircle2, XCircle, HelpCircle, RotateCcw, Home, ChevronDown, ChevronUp, Sparkles, Lightbulb, MessageSquare } from 'lucide-react-native';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import ZoomableImageCard from '../components/ZoomableImageCard';
 import AiChatModal from '../components/AiChatModal';
 import { saveHistoryApi, fetchAiExplanationApi } from '../services/api';
 
@@ -58,7 +59,10 @@ export default function ResultScreen({ route, navigation }) {
       correctAnswerLetter: q.correctAnswerLetter || (optionLabels[q.correctOptionIndex] || 'A'),
       correctOptionIndex: q.correctOptionIndex !== undefined ? q.correctOptionIndex : 0,
       isCorrect,
-      explanation: q.explanation || 'No explanation provided.'
+      explanation: q.explanation || 'No explanation provided.',
+      questionImage: q.questionImage || q.questionpic || q.image || q.question_image || null,
+      questionpic: q.questionpic || q.questionImage || null,
+      cloudanary_link: q.cloudanary_link || q.cloudinary_link || q.explanationPic || q.explanationImage || null,
     };
   });
 
@@ -191,6 +195,8 @@ export default function ResultScreen({ route, navigation }) {
             const isCorrect = userChoice === q.correctOptionIndex;
             const isSkipped = userChoice === undefined || userChoice === null;
             const isExpanded = expandedIndex === idx;
+            const questionPicUrl = q.questionImage || q.questionpic || q.image || q.question_image;
+            const explanationPicUrl = q.cloudanary_link || q.cloudinary_link || q.explanationPic || q.explanationImage || q.explanation_pic;
 
             return (
               <View key={idx} style={styles.reviewCard}>
@@ -224,6 +230,16 @@ export default function ResultScreen({ route, navigation }) {
                   <View style={styles.reviewDetails}>
                     <Text style={styles.fullQText}>{q.questionText}</Text>
 
+                    {/* Question Image (displayed below question and before options) */}
+                    {questionPicUrl ? (
+                      <ZoomableImageCard
+                        uri={questionPicUrl}
+                        caption={`Question ${idx + 1} Diagram`}
+                        theme="dark"
+                        style={{ marginTop: 8, marginBottom: 12 }}
+                      />
+                    ) : null}
+
                     <View style={styles.reviewOptionsList}>
                       {(q.options || []).map((optText, optIdx) => {
                         const isUserSelected = userChoice === optIdx;
@@ -256,7 +272,11 @@ export default function ResultScreen({ route, navigation }) {
                     {q.explanation && (
                       <View style={styles.reviewExpBox}>
                         <Text style={styles.reviewExpTitle}>Printed Explanation:</Text>
-                        <MarkdownRenderer content={q.explanation} />
+                        <MarkdownRenderer
+                          content={q.explanation}
+                          explanationImage={explanationPicUrl}
+                          theme="dark"
+                        />
                       </View>
                     )}
 
@@ -306,6 +326,7 @@ export default function ResultScreen({ route, navigation }) {
               </View>
             );
           })}
+
         </View>
       </ScrollView>
 

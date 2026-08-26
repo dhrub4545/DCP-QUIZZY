@@ -62,16 +62,28 @@ async function seedQuizzes() {
         continue;
       }
 
-      const formattedQuestions = rawQuestions.map((q, idx) => ({
-        questionNumber: q.questionNumber || (idx + 1),
-        topic: (q.topic && q.topic.trim()) || config.subject,
-        questionText: q.questionText ? q.questionText.trim() : 'Question text unavailable',
-        options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
-        correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
-        correctAnswerLetter: q.correctAnswerLetter || 'A',
-        explanation: q.explanation ? q.explanation.trim() : 'No explanation provided.',
-        confidence: typeof q.confidence === 'number' ? q.confidence : 1.0
-      }));
+      const formattedQuestions = rawQuestions.map((q, idx) => {
+        const cloudUrl = q.cloudanary_link || q.cloudinary_link || q.explanationPic || q.explanation_pic || q.explanationImage || q.explanation_image || null;
+        const qPicUrl = q.questionpic || q.questionImage || q.questionPic || q.question_image || q.question_pic || q.image || null;
+
+        return {
+          questionNumber: q.questionNumber || (idx + 1),
+          topic: (q.topic && q.topic.trim()) || config.subject,
+          questionText: q.questionText ? q.questionText.trim() : 'Question text unavailable',
+          options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
+          correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
+          correctAnswerLetter: q.correctAnswerLetter || 'A',
+          explanation: q.explanation ? q.explanation.trim() : 'No explanation provided.',
+          confidence: typeof q.confidence === 'number' ? q.confidence : 1.0,
+          questionImage: qPicUrl,
+          questionpic: qPicUrl,
+          image: qPicUrl,
+          cloudanary_link: cloudUrl,
+          cloudinary_link: cloudUrl,
+          explanationPic: cloudUrl,
+          explanationImage: cloudUrl
+        };
+      });
 
       const fullDescription = `${config.description.replace('questions across', `${formattedQuestions.length} questions across`)}`;
 
