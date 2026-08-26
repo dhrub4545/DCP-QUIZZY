@@ -27,7 +27,9 @@ import {
   Lightbulb,
   X,
   SlidersHorizontal,
+  Moon,
 } from 'lucide-react-native';
+import { useTheme } from '../context/ThemeContext';
 import { fetchQuizzes, createQuizApi, fetchHistoryApi } from '../services/api';
 import ManageQuizModal from '../components/ManageQuizModal';
 import TestConfigModal from '../components/TestConfigModal';
@@ -35,6 +37,7 @@ import CustomQuizBuilderModal from '../components/CustomQuizBuilderModal';
 import BottomTabBar from '../components/BottomTabBar';
 
 export default function HomeScreen({ navigation, route }) {
+  const { theme, isGlass, toggleTheme } = useTheme();
   const [quizzes, setQuizzes] = useState([]);
   const [historyList, setHistoryList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -180,27 +183,49 @@ export default function HomeScreen({ navigation, route }) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
       {/* Header Bar */}
-      <View style={styles.header}>
+      <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
           <View style={styles.brandTitleRow}>
             <Text style={styles.brandTitle}>QUIZZY</Text>
-            <View style={styles.proTag}>
-              <Sparkles size={10} color="#a855f7" />
-              <Text style={styles.proTagText}>AI Powered</Text>
+            <View style={[styles.proTag, isGlass && styles.proTagGlass]}>
+              <Sparkles size={10} color={isGlass ? '#c084fc' : '#a855f7'} />
+              <Text style={[styles.proTagText, isGlass && styles.proTagTextGlass]}>AI Powered</Text>
             </View>
           </View>
-          <Text style={styles.brandSubtitle}>Custom Practice & Performance Analytics</Text>
+          <Text style={styles.brandSubtitle}>Custom Practice & Analytics</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.historyHeaderBtn}
-          onPress={() => navigation.navigate('History')}
-        >
-          <Clock size={16} color="#818cf8" />
-          <Text style={styles.historyHeaderBtnText}>History</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRightActions}>
+          {/* Top-Right Theme Toggle Button */}
+          <TouchableOpacity
+            style={[styles.themeHeaderBtn, isGlass && styles.themeHeaderBtnGlass]}
+            onPress={toggleTheme}
+            activeOpacity={0.7}
+          >
+            {isGlass ? (
+              <>
+                <Sparkles size={13} color="#c084fc" />
+                <Text style={styles.themeHeaderBtnTextGlass}>Glass</Text>
+              </>
+            ) : (
+              <>
+                <Moon size={13} color="#94a3b8" />
+                <Text style={styles.themeHeaderBtnTextDark}>Dark</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* History Header Button */}
+          <TouchableOpacity
+            style={[styles.historyHeaderBtn, isGlass && styles.historyHeaderBtnGlass]}
+            onPress={() => navigation.navigate('History')}
+          >
+            <Clock size={14} color={isGlass ? '#c084fc' : '#818cf8'} />
+            <Text style={[styles.historyHeaderBtnText, isGlass && styles.historyHeaderBtnTextGlass]}>History</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -210,44 +235,69 @@ export default function HomeScreen({ navigation, route }) {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={['#6366f1']}
+            colors={[isGlass ? '#a855f7' : '#6366f1']}
           />
         }
       >
         {loading ? (
           <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#6366f1" />
+            <ActivityIndicator size="large" color={isGlass ? '#a855f7' : '#6366f1'} />
             <Text style={styles.loadingText}>Loading performance metrics...</Text>
           </View>
         ) : (
           <>
             {/* Overall Mastery Progress Banner */}
-            <View style={styles.masteryCard}>
+            <View style={[styles.masteryCard, isGlass && styles.masteryCardGlass]}>
               <View style={styles.masteryHeaderRow}>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.masteryTitle}>Overall Progress</Text>
                   <Text style={styles.masterySub}>Target Accuracy & Score Rate</Text>
                 </View>
-                <View style={styles.masteryScoreBadge}>
-                  <TrendingUp size={14} color="#10b981" />
-                  <Text style={styles.masteryScoreText}>
-                    {averageAccuracy > 0 ? `${averageAccuracy}%` : '0%'}
-                  </Text>
+
+                <View style={styles.masteryHeaderRightGroup}>
+                  {/* Theme Mode Toggle inside Progress / History Card Top Right */}
+                  <TouchableOpacity
+                    style={[styles.themePillToggle, isGlass ? styles.themePillToggleGlass : styles.themePillToggleDark]}
+                    onPress={toggleTheme}
+                    activeOpacity={0.7}
+                  >
+                    {isGlass ? (
+                      <>
+                        <Sparkles size={11} color="#c084fc" />
+                        <Text style={styles.themePillTextGlass}>Glass UI</Text>
+                        <View style={styles.themePillDotGlass} />
+                      </>
+                    ) : (
+                      <>
+                        <Moon size={11} color="#94a3b8" />
+                        <Text style={styles.themePillTextDark}>Dark UI</Text>
+                        <View style={styles.themePillDotDark} />
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <View style={[styles.masteryScoreBadge, isGlass && styles.masteryScoreBadgeGlass]}>
+                    <TrendingUp size={13} color="#10b981" />
+                    <Text style={styles.masteryScoreText}>
+                      {averageAccuracy > 0 ? `${averageAccuracy}%` : '0%'}
+                    </Text>
+                  </View>
                 </View>
               </View>
 
               {/* Progress Bar Component */}
-              <View style={styles.progressTrack}>
+              <View style={[styles.progressTrack, isGlass && styles.progressTrackGlass]}>
                 <View
                   style={[
                     styles.fillBar,
+                    isGlass && styles.fillBarGlass,
                     { width: `${Math.min(Math.max(averageAccuracy, 6), 100)}%` },
                   ]}
                 />
               </View>
 
               <View style={styles.masteryFooterRow}>
-                <Text style={styles.masteryFooterLeft}>
+                <Text style={[styles.masteryFooterLeft, isGlass && styles.masteryFooterLeftGlass]}>
                   {totalCorrectCount} Total Correct Answers
                 </Text>
                 <Text style={styles.masteryFooterRight}>
@@ -260,25 +310,25 @@ export default function HomeScreen({ navigation, route }) {
             <Text style={styles.sectionTitle}>Performance Analytics</Text>
             <View style={styles.statsGrid}>
               {/* Total Quizzes Card */}
-              <View style={styles.statBox}>
-                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(99, 102, 241, 0.2)' }]}>
-                  <BookOpen size={18} color="#818cf8" />
+              <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
+                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.2)' }]}>
+                  <BookOpen size={18} color={isGlass ? '#a5b4fc' : '#818cf8'} />
                 </View>
                 <Text style={styles.statVal}>{totalQuizzes}</Text>
                 <Text style={styles.statLbl}>Available Quizzes</Text>
               </View>
 
               {/* Total Question Bank Card */}
-              <View style={styles.statBox}>
-                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(168, 85, 247, 0.2)' }]}>
-                  <Zap size={18} color="#c084fc" />
+              <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
+                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                  <Zap size={18} color={isGlass ? '#d8b4fe' : '#c084fc'} />
                 </View>
                 <Text style={styles.statVal}>{totalQuestions}</Text>
                 <Text style={styles.statLbl}>Question Bank</Text>
               </View>
 
               {/* Test Attempts Card */}
-              <View style={styles.statBox}>
+              <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
                 <View style={[styles.statIconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
                   <Target size={18} color="#10b981" />
                 </View>
@@ -287,7 +337,7 @@ export default function HomeScreen({ navigation, route }) {
               </View>
 
               {/* Average Accuracy Card */}
-              <View style={styles.statBox}>
+              <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
                 <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
                   <Award size={18} color="#fbbf24" />
                 </View>
@@ -296,17 +346,17 @@ export default function HomeScreen({ navigation, route }) {
               </View>
             </View>
 
-            {/* Organized Quick Action Section */}
+            {/* Organized Quick Hub Section */}
             <Text style={styles.sectionTitle}>Quick Hub</Text>
 
             {/* Explore Quiz Bank Card */}
             <TouchableOpacity
-              style={styles.actionCard}
+              style={[styles.actionCard, isGlass && styles.actionCardGlass]}
               onPress={() => navigation.navigate('Quizzes')}
               activeOpacity={0.8}
             >
-              <View style={[styles.actionIconBox, { backgroundColor: 'rgba(99, 102, 241, 0.2)' }]}>
-                <BookOpen size={22} color="#818cf8" />
+              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.2)' }]}>
+                <BookOpen size={22} color={isGlass ? '#a5b4fc' : '#818cf8'} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.actionCardTitle}>Explore Quiz Directory</Text>
@@ -317,12 +367,12 @@ export default function HomeScreen({ navigation, route }) {
 
             {/* Build Custom Multi-Source Test Card */}
             <TouchableOpacity
-              style={styles.actionCard}
+              style={[styles.actionCard, isGlass && styles.actionCardGlass]}
               onPress={() => setCustomBuilderVisible(true)}
               activeOpacity={0.8}
             >
-              <View style={[styles.actionIconBox, { backgroundColor: 'rgba(168, 85, 247, 0.2)' }]}>
-                <SlidersHorizontal size={22} color="#c084fc" />
+              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                <SlidersHorizontal size={22} color={isGlass ? '#d8b4fe' : '#c084fc'} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.actionCardTitle}>Build Multi-Source Test</Text>
@@ -333,7 +383,7 @@ export default function HomeScreen({ navigation, route }) {
 
             {/* Create New Quiz Card */}
             <TouchableOpacity
-              style={styles.actionCard}
+              style={[styles.actionCard, isGlass && styles.actionCardGlass]}
               onPress={() => setCreateModalVisible(true)}
               activeOpacity={0.8}
             >
@@ -347,24 +397,55 @@ export default function HomeScreen({ navigation, route }) {
               <ChevronRight size={18} color="#64748b" />
             </TouchableOpacity>
 
-            {/* View History Card */}
-            <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => navigation.navigate('History')}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.actionIconBox, { backgroundColor: 'rgba(168, 85, 247, 0.2)' }]}>
-                <Clock size={22} color="#c084fc" />
+            {/* Test Attempt History Card with Theme Mode Toggle on Top-Right */}
+            <View style={[styles.historyCardContainer, isGlass && styles.historyCardContainerGlass]}>
+              <View style={styles.historyCardHeaderRow}>
+                <View style={styles.historyCardTitleRow}>
+                  <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                    <Clock size={20} color={isGlass ? '#d8b4fe' : '#c084fc'} />
+                  </View>
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={styles.actionCardTitle}>Test Attempt History</Text>
+                    <Text style={styles.actionCardSub}>Review scorecards & analytics</Text>
+                  </View>
+                </View>
+
+                {/* Theme Mode Toggle Button placed on top-right of the History Card */}
+                <TouchableOpacity
+                  style={[styles.themePillToggle, isGlass ? styles.themePillToggleGlass : styles.themePillToggleDark]}
+                  onPress={toggleTheme}
+                  activeOpacity={0.7}
+                >
+                  {isGlass ? (
+                    <>
+                      <Sparkles size={13} color="#c084fc" />
+                      <Text style={styles.themePillTextGlass}>Glass UI</Text>
+                      <View style={styles.themePillDotGlass} />
+                    </>
+                  ) : (
+                    <>
+                      <Moon size={13} color="#94a3b8" />
+                      <Text style={styles.themePillTextDark}>Dark UI</Text>
+                      <View style={styles.themePillDotDark} />
+                    </>
+                  )}
+                </TouchableOpacity>
               </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.actionCardTitle}>Test Attempt History</Text>
-                <Text style={styles.actionCardSub}>Review scorecards & AI tutor explanations</Text>
-              </View>
-              <ChevronRight size={18} color="#64748b" />
-            </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.historyCardActionBtn, isGlass && styles.historyCardActionBtnGlass]}
+                onPress={() => navigation.navigate('History')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.historyCardActionText, isGlass && styles.historyCardActionTextGlass]}>
+                  Open Full Attempt History & Explanations
+                </Text>
+                <ChevronRight size={16} color={isGlass ? '#c084fc' : '#818cf8'} />
+              </TouchableOpacity>
+            </View>
 
             {/* Daily AI Study Tip Box */}
-            <View style={styles.studyTipBox}>
+            <View style={[styles.studyTipBox, isGlass && styles.studyTipBoxGlass]}>
               <View style={styles.tipHeaderRow}>
                 <Lightbulb size={16} color="#fbbf24" />
                 <Text style={styles.tipTitle}>AI Learning Insight</Text>
@@ -544,11 +625,44 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     marginTop: 1,
   },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  themeHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  themeHeaderBtnGlass: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    borderColor: '#c084fc',
+    shadowColor: '#c084fc',
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+  },
+  themeHeaderBtnTextDark: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#94a3b8',
+  },
+  themeHeaderBtnTextGlass: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#e9d5ff',
+  },
   historyHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(99, 102, 241, 0.15)',
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
@@ -558,7 +672,12 @@ const styles = StyleSheet.create({
     color: '#818cf8',
     fontWeight: '700',
     fontSize: 12,
-    marginLeft: 4,
+    marginLeft: 3,
+  },
+  masteryHeaderRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   scrollContent: {
     paddingHorizontal: 10,
@@ -822,5 +941,165 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 13,
+  },
+
+  // Glassmorphic Theme Overrides
+  containerGlass: {
+    backgroundColor: '#090d16',
+  },
+  headerGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderBottomColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  proTagGlass: {
+    backgroundColor: 'rgba(168, 85, 247, 0.25)',
+    borderColor: '#c084fc',
+  },
+  proTagTextGlass: {
+    color: '#e9d5ff',
+  },
+  historyHeaderBtnGlass: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    borderColor: 'rgba(192, 132, 252, 0.5)',
+  },
+  historyHeaderBtnTextGlass: {
+    color: '#d8b4fe',
+  },
+  masteryCardGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    borderColor: 'rgba(139, 92, 246, 0.35)',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  masteryScoreBadgeGlass: {
+    backgroundColor: 'rgba(16, 185, 129, 0.25)',
+    borderColor: '#34d399',
+  },
+  progressTrackGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  fillBarGlass: {
+    backgroundColor: '#9333ea',
+  },
+  masteryFooterLeftGlass: {
+    color: '#c084fc',
+  },
+  statBoxGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  actionCardGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    borderColor: 'rgba(99, 102, 241, 0.25)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  historyCardContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  historyCardContainerGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.68)',
+    borderColor: 'rgba(168, 85, 247, 0.35)',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  historyCardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  historyCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 6,
+  },
+  themePillToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  themePillToggleDark: {
+    backgroundColor: '#0f172a',
+    borderColor: '#475569',
+  },
+  themePillToggleGlass: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    borderColor: '#c084fc',
+    shadowColor: '#c084fc',
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  themePillTextDark: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94a3b8',
+  },
+  themePillTextGlass: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#e9d5ff',
+  },
+  themePillDotDark: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#64748b',
+  },
+  themePillDotGlass: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#a855f7',
+  },
+  historyCardActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0f172a',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  historyCardActionBtnGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderColor: 'rgba(168, 85, 247, 0.3)',
+  },
+  historyCardActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#818cf8',
+  },
+  historyCardActionTextGlass: {
+    color: '#d8b4fe',
+    fontWeight: '700',
+  },
+  studyTipBoxGlass: {
+    backgroundColor: 'rgba(124, 58, 237, 0.15)',
+    borderColor: 'rgba(168, 85, 247, 0.35)',
   },
 });

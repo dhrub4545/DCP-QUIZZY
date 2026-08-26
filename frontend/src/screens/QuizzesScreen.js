@@ -31,12 +31,14 @@ import {
   UserCheck,
 } from 'lucide-react-native';
 import { fetchQuizzes, deleteQuiz } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 import ManageQuizModal from '../components/ManageQuizModal';
 import TestConfigModal from '../components/TestConfigModal';
 import CustomQuizBuilderModal from '../components/CustomQuizBuilderModal';
 import BottomTabBar from '../components/BottomTabBar';
 
 export default function QuizzesScreen({ navigation }) {
+  const { isGlass } = useTheme();
   const [quizzes, setQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -204,11 +206,11 @@ export default function QuizzesScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
       
       {/* Header Bar */}
-      <View style={styles.header}>
+      <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Quiz Directory</Text>
           <Text style={styles.headerSubtitle}>
@@ -223,7 +225,7 @@ export default function QuizzesScreen({ navigation }) {
         </View>
 
         <TouchableOpacity
-          style={styles.buildCustomHeaderBtn}
+          style={[styles.buildCustomHeaderBtn, isGlass && styles.buildCustomHeaderBtnGlass]}
           onPress={() => setCustomBuilderVisible(true)}
           activeOpacity={0.8}
         >
@@ -233,7 +235,7 @@ export default function QuizzesScreen({ navigation }) {
       </View>
 
       {/* Top Folder / Category Switcher Pills */}
-      <View style={styles.sectionSwitcherWrapper}>
+      <View style={[styles.sectionSwitcherWrapper, isGlass && styles.sectionSwitcherWrapperGlass]}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -242,6 +244,7 @@ export default function QuizzesScreen({ navigation }) {
           <TouchableOpacity
             style={[
               styles.sectionBtn,
+              isGlass && styles.sectionBtnGlass,
               quizCategory === 'all' && styles.sectionBtnActive,
             ]}
             onPress={() => setQuizCategory('all')}
@@ -264,6 +267,7 @@ export default function QuizzesScreen({ navigation }) {
           <TouchableOpacity
             style={[
               styles.sectionBtn,
+              isGlass && styles.sectionBtnGlass,
               quizCategory === 'nmcle' && styles.sectionBtnActiveNmcle,
             ]}
             onPress={() => setQuizCategory('nmcle')}
@@ -286,6 +290,7 @@ export default function QuizzesScreen({ navigation }) {
           <TouchableOpacity
             style={[
               styles.sectionBtn,
+              isGlass && styles.sectionBtnGlass,
               quizCategory === 'book' && styles.sectionBtnActiveBook,
             ]}
             onPress={() => setQuizCategory('book')}
@@ -309,6 +314,7 @@ export default function QuizzesScreen({ navigation }) {
             <TouchableOpacity
               style={[
                 styles.sectionBtn,
+                isGlass && styles.sectionBtnGlass,
                 quizCategory === 'custom' && styles.sectionBtnActiveCustom,
               ]}
               onPress={() => setQuizCategory('custom')}
@@ -336,6 +342,7 @@ export default function QuizzesScreen({ navigation }) {
         <Pressable
           style={[
             styles.modernSearchBox,
+            isGlass && styles.modernSearchBoxGlass,
             isSearchFocused && styles.modernSearchBoxFocused,
           ]}
           onPress={() => searchInputRef.current?.focus()}
@@ -436,7 +443,7 @@ export default function QuizzesScreen({ navigation }) {
             const isCustomItem = isCustomQuiz(item);
 
             return (
-              <View style={styles.quizCard}>
+              <View style={[styles.quizCard, isGlass && styles.quizCardGlass]}>
                 <View style={styles.quizCardHeader}>
                   <View style={styles.headerBadgesRow}>
                     <View
@@ -872,5 +879,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#334155',
+  },
+
+  // Glassmorphism Theme Overrides
+  containerGlass: {
+    backgroundColor: '#090d16',
+  },
+  headerGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderBottomColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  buildCustomHeaderBtnGlass: {
+    backgroundColor: '#9333ea',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  sectionSwitcherWrapperGlass: {
+    backgroundColor: 'transparent',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  sectionBtnGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.55)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modernSearchBoxGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  quizCardGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
   },
 });

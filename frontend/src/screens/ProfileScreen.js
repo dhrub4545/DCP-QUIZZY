@@ -25,9 +25,11 @@ import {
   CheckCircle2,
 } from 'lucide-react-native';
 import { changePasswordApi, fetchHistoryApi, setAuthToken } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 import BottomTabBar from '../components/BottomTabBar';
 
 export default function ProfileScreen({ navigation, route }) {
+  const { isGlass } = useTheme();
   const user = route?.params?.user || { name: 'User Profile', email: 'student@quizzy.app' };
 
   // Password Change Form State
@@ -141,11 +143,11 @@ export default function ProfileScreen({ navigation, route }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
       <ScrollView style={styles.scrollBody} showsVerticalScrollIndicator={false}>
         {/* Profile User Header Card */}
-        <View style={styles.userHeaderCard}>
-          <View style={styles.avatarCircle}>
+        <View style={[styles.userHeaderCard, isGlass && styles.userHeaderCardGlass]}>
+          <View style={[styles.avatarCircle, isGlass && styles.avatarCircleGlass]}>
             <Text style={styles.avatarText}>{getUserInitials(user.name)}</Text>
           </View>
 
@@ -164,13 +166,13 @@ export default function ProfileScreen({ navigation, route }) {
 
         {/* Account Performance Summary */}
         <View style={styles.statsRowContainer}>
-          <View style={styles.statBox}>
-            <Award size={18} color="#818cf8" style={{ marginBottom: 4 }} />
+          <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
+            <Award size={18} color={isGlass ? '#c084fc' : '#818cf8'} style={{ marginBottom: 4 }} />
             <Text style={styles.statNumber}>{historyCount}</Text>
             <Text style={styles.statLabel}>Tests Attempted</Text>
           </View>
 
-          <View style={styles.statBox}>
+          <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
             <CheckCircle2 size={18} color="#34d399" style={{ marginBottom: 4 }} />
             <Text style={styles.statNumber}>{avgScore}%</Text>
             <Text style={styles.statLabel}>Avg Accuracy</Text>
@@ -178,9 +180,9 @@ export default function ProfileScreen({ navigation, route }) {
         </View>
 
         {/* Change Password Card */}
-        <View style={styles.cardSection}>
+        <View style={[styles.cardSection, isGlass && styles.cardSectionGlass]}>
           <View style={styles.cardHeaderRow}>
-            <KeyRound size={18} color="#818cf8" style={{ marginRight: 6 }} />
+            <KeyRound size={18} color={isGlass ? '#c084fc' : '#818cf8'} style={{ marginRight: 6 }} />
             <Text style={styles.cardHeaderTitle}>Change Password</Text>
           </View>
           <Text style={styles.cardHeaderSub}>
@@ -190,7 +192,7 @@ export default function ProfileScreen({ navigation, route }) {
           {/* Current Password */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Current Password</Text>
-            <View style={styles.passwordInputWrapper}>
+            <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
               <Lock size={15} color="#64748b" style={styles.inputIcon} />
               <TextInput
                 style={styles.passwordInput}
@@ -209,7 +211,7 @@ export default function ProfileScreen({ navigation, route }) {
           {/* New Password */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>New Password</Text>
-            <View style={styles.passwordInputWrapper}>
+            <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
               <Lock size={15} color="#64748b" style={styles.inputIcon} />
               <TextInput
                 style={styles.passwordInput}
@@ -228,7 +230,7 @@ export default function ProfileScreen({ navigation, route }) {
           {/* Confirm New Password */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Confirm New Password</Text>
-            <View style={styles.passwordInputWrapper}>
+            <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
               <Lock size={15} color="#64748b" style={styles.inputIcon} />
               <TextInput
                 style={styles.passwordInput}
@@ -246,7 +248,7 @@ export default function ProfileScreen({ navigation, route }) {
 
           {/* Update Password Button */}
           <TouchableOpacity
-            style={[styles.updateBtn, submitting && { opacity: 0.7 }]}
+            style={[styles.updateBtn, isGlass && styles.updateBtnGlass, submitting && { opacity: 0.7 }]}
             onPress={handleChangePassword}
             disabled={submitting}
           >
@@ -449,5 +451,49 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 14,
     fontWeight: '700',
+  },
+
+  // Glassmorphic Theme Overrides
+  containerGlass: {
+    backgroundColor: '#090d16',
+  },
+  userHeaderCardGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    borderColor: 'rgba(139, 92, 246, 0.35)',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  avatarCircleGlass: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#c084fc',
+  },
+  statBoxGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  cardSectionGlass: {
+    backgroundColor: 'rgba(30, 41, 59, 0.65)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  passwordInputWrapperGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    borderColor: 'rgba(139, 92, 246, 0.25)',
+  },
+  updateBtnGlass: {
+    backgroundColor: '#9333ea',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
   },
 });

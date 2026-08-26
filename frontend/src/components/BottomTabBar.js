@@ -1,12 +1,15 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Home, BookOpen, Clock, User, GraduationCap } from 'lucide-react-native';
+import { useTheme } from '../context/ThemeContext';
 
 /**
  * BottomTabBar component
  * Fixed bottom navigation bar featuring Home, Quizzes, Study, History, and Profile tabs.
  */
 export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
+  const { isGlass } = useTheme();
+
   const handleStudyPress = () => {
     if (onStudyPress) {
       onStudyPress();
@@ -16,7 +19,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
   };
 
   return (
-    <View style={styles.footerContainer}>
+    <View style={[styles.footerContainer, isGlass && styles.footerContainerGlass]}>
       {/* Home Tab */}
       <TouchableOpacity
         style={styles.tabItem}
@@ -25,9 +28,9 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <Home
           size={19}
-          color={activeTab === 'Home' ? '#818cf8' : '#64748b'}
+          color={activeTab === 'Home' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
-        <Text style={[styles.tabLabel, activeTab === 'Home' && styles.activeTabLabel]}>
+        <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Home' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Home
         </Text>
       </TouchableOpacity>
@@ -40,9 +43,9 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <BookOpen
           size={19}
-          color={activeTab === 'Quizzes' ? '#818cf8' : '#64748b'}
+          color={activeTab === 'Quizzes' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
-        <Text style={[styles.tabLabel, activeTab === 'Quizzes' && styles.activeTabLabel]}>
+        <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Quizzes' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Quizzes
         </Text>
       </TouchableOpacity>
@@ -53,10 +56,10 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
         onPress={handleStudyPress}
         activeOpacity={0.8}
       >
-        <View style={[styles.addBtnCircle, activeTab === 'Study' && styles.activeAddBtnCircle]}>
+        <View style={[styles.addBtnCircle, isGlass && styles.addBtnCircleGlass, activeTab === 'Study' && (isGlass ? styles.activeAddBtnCircleGlass : styles.activeAddBtnCircle)]}>
           <GraduationCap size={23} color="#ffffff" />
         </View>
-        <Text style={[styles.addTabLabel, activeTab === 'Study' && styles.activeAddTabLabel]}>
+        <Text style={[styles.addTabLabel, isGlass && styles.addTabLabelGlass, activeTab === 'Study' && (isGlass ? styles.activeAddTabLabelGlass : styles.activeAddTabLabel)]}>
           Study
         </Text>
       </TouchableOpacity>
@@ -69,9 +72,9 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <Clock
           size={19}
-          color={activeTab === 'History' ? '#818cf8' : '#64748b'}
+          color={activeTab === 'History' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
-        <Text style={[styles.tabLabel, activeTab === 'History' && styles.activeTabLabel]}>
+        <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'History' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           History
         </Text>
       </TouchableOpacity>
@@ -84,9 +87,9 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <User
           size={19}
-          color={activeTab === 'Profile' ? '#818cf8' : '#64748b'}
+          color={activeTab === 'Profile' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
-        <Text style={[styles.tabLabel, activeTab === 'Profile' && styles.activeTabLabel]}>
+        <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Profile' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Profile
         </Text>
       </TouchableOpacity>
@@ -110,6 +113,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
   },
+  footerContainerGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderTopColor: 'rgba(139, 92, 246, 0.3)',
+    borderTopWidth: 1.5,
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+  },
   tabItem: {
     flex: 1,
     alignItems: 'center',
@@ -122,9 +133,16 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 3,
   },
+  tabLabelGlass: {
+    color: '#94a3b8',
+  },
   activeTabLabel: {
     color: '#818cf8',
     fontWeight: '700',
+  },
+  activeTabLabelGlass: {
+    color: '#c084fc',
+    fontWeight: '800',
   },
   addTabItem: {
     flex: 1,
@@ -147,9 +165,20 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
   },
+  addBtnCircleGlass: {
+    backgroundColor: '#7c3aed',
+    borderColor: 'rgba(15, 23, 42, 0.9)',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+  },
   activeAddBtnCircle: {
     backgroundColor: '#818cf8',
     borderColor: '#6366f1',
+  },
+  activeAddBtnCircleGlass: {
+    backgroundColor: '#9333ea',
+    borderColor: '#c084fc',
   },
   addTabLabel: {
     fontSize: 10.5,
@@ -157,8 +186,15 @@ const styles = StyleSheet.create({
     color: '#818cf8',
     marginTop: 2,
   },
+  addTabLabelGlass: {
+    color: '#c084fc',
+  },
   activeAddTabLabel: {
     color: '#a5b4fc',
+    fontWeight: '800',
+  },
+  activeAddTabLabelGlass: {
+    color: '#e9d5ff',
     fontWeight: '800',
   },
 });
