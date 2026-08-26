@@ -206,24 +206,15 @@ export default function HomeScreen({ navigation, route }) {
           >
             {isGlass ? (
               <>
-                <Sparkles size={13} color="#c084fc" />
-                <Text style={styles.themeHeaderBtnTextGlass}>Glass</Text>
+                <Sparkles size={14} color="#c084fc" />
+                <Text style={styles.themeHeaderBtnTextGlass}>Glass UI</Text>
               </>
             ) : (
               <>
-                <Moon size={13} color="#94a3b8" />
-                <Text style={styles.themeHeaderBtnTextDark}>Dark</Text>
+                <Moon size={14} color="#94a3b8" />
+                <Text style={styles.themeHeaderBtnTextDark}>Dark UI</Text>
               </>
             )}
-          </TouchableOpacity>
-
-          {/* History Header Button */}
-          <TouchableOpacity
-            style={[styles.historyHeaderBtn, isGlass && styles.historyHeaderBtnGlass]}
-            onPress={() => navigation.navigate('History')}
-          >
-            <Clock size={14} color={isGlass ? '#c084fc' : '#818cf8'} />
-            <Text style={[styles.historyHeaderBtnText, isGlass && styles.historyHeaderBtnTextGlass]}>History</Text>
           </TouchableOpacity>
         </View>
       </View>
