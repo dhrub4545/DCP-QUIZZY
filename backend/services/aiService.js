@@ -27,57 +27,78 @@ function getNextApiKey() {
   return key;
 }
 
-const TARGET_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
-
 /**
- * Execute a Gemini AI call using ONLY Gemini 3.6 Flash model across all available Gemini API keys.
- * If an error occurs on one key, automatically tries the next Gemini key in the loop.
- * If all keys fail after trying every single key, breaks the loop and throws a user-friendly error message.
+ * Fallback Strategy:
+ * 1. ONLY uses 'gemini-3.7-flash' and 'gemini-3.6-flash'.
+ * 2. Starts with a randomly selected key for distributed traffic.
+ * 3. Attempts 'gemini-3.7-flash' on the active key using natural API execution.
+ * 4. If an error occurs, immediately tries 'gemini-3.6-flash' on the SAME key.
+ * 5. If both fail on that key, advances to the next key in sequence and repeats (3.7 -> 3.6).
+ * 6. The backend maintains total control over error responses; the client waits until completion.
  */
 async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
   let lastError = null;
   const keys = getAvailableKeys();
 
   if (keys.length === 0) {
-    throw new Error('No Gemini API keys found in environment. Please set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc. in .env');
+    throw new Error('No Gemini API keys found in environment. Please set GEMINI_API_KEY in .env');
   }
 
-  // Try each Gemini key in sequence
-  for (let keyAttempt = 0; keyAttempt < keys.length; keyAttempt++) {
-    const apiKey = getNextApiKey();
+  const contentsPayload = Array.isArray(contentsInput) ? contentsInput : [contentsInput];
+
+  // Start with a randomly chosen key for optimal load balancing
+  const startIdx = Math.floor(Math.random() * keys.length);
+
+  for (let attempt = 0; attempt < keys.length; attempt++) {
+    const currentIdx = (startIdx + attempt) % keys.length;
+    const apiKey = keys[currentIdx];
     const keyMasked = apiKey.length > 8 ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'key';
 
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const contentsPayload = Array.isArray(contentsInput) ? contentsInput : [contentsInput];
+    const ai = new GoogleGenAI({ apiKey });
 
-      const res = await ai.models.generateContent({
-        model: TARGET_MODEL,
+    // Step 1: Try gemini-3.7-flash with current key
+    try {
+      console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> Trying gemini-3.7-flash...`);
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
         contents: contentsPayload,
         config: {
           systemInstruction: systemInstruction || 'You are an expert AI medical & academic tutor.',
-          safetySettings: [
-            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' }
-          ]
-        }
+        },
       });
 
-      if (res && res.text) {
-        return { text: res.text, modelUsed: TARGET_MODEL };
+      if (response && response.text) {
+        console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.7-flash SUCCESS!`);
+        return { text: response.text, modelUsed: 'gemini-3.7-flash' };
       }
-    } catch (err) {
-      console.warn(`[Gemini Engine] Key ${keyMasked} attempt (${keyAttempt + 1}/${keys.length}) failed: ${err.message}. Trying next key...`);
-      lastError = err;
+    } catch (err37) {
+      console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.7-flash: ${err37.message || err37}. Trying gemini-3.6-flash on SAME key...`);
+      lastError = err37;
+
+      // Step 2: Try gemini-3.6-flash with the SAME key
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: contentsPayload,
+          config: {
+            systemInstruction: systemInstruction || 'You are an expert AI medical & academic tutor.',
+          },
+        });
+
+        if (response && response.text) {
+          console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.6-flash SUCCESS!`);
+          return { text: response.text, modelUsed: 'gemini-3.6-flash' };
+        }
+      } catch (err36) {
+        console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.6-flash ALSO failed: ${err36.message || err36}. Trying next key...`);
+        lastError = err36;
+      }
     }
   }
 
-  // All keys in loop completed with errors
-  console.error(`[Gemini Engine] All ${keys.length} API keys failed. Returning try later error.`);
-  throw new Error('All Gemini AI servers are currently busy or rate-limited. Please try again later.');
+  // All keys exhausted
+  console.error(`[Gemini Engine] All ${keys.length} keys failed for both gemini-3.7-flash and gemini-3.6-flash:`, lastError?.message);
+  throw new Error('AI service is temporarily busy. Please try again in a few moments.');
 }
 
 // In-memory cache for AI explanations (Max 5,000 items, LRU-like behavior)
