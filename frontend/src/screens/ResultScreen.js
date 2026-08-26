@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Award, CheckCircle2, XCircle, HelpCircle, RotateCcw, Home, ChevronDown, ChevronUp, Sparkles, Lightbulb, MessageSquare } from 'lucide-react-native';
@@ -13,6 +14,7 @@ import MarkdownRenderer from '../components/MarkdownRenderer';
 import ZoomableImageCard from '../components/ZoomableImageCard';
 import AiChatModal from '../components/AiChatModal';
 import { saveHistoryApi, fetchAiExplanationApi } from '../services/api';
+import { getCachedHistory, setCachedHistory } from '../services/appStateCache';
 
 export default function ResultScreen({ route, navigation }) {
   const { quiz, userAnswers = {}, timeSpentSeconds = 0 } = route.params || {};
@@ -73,7 +75,7 @@ export default function ResultScreen({ route, navigation }) {
     const saveResult = async () => {
       if (historySaved || !quiz || !quiz._id) return;
       try {
-        await saveHistoryApi({
+        const res = await saveHistoryApi({
           quizId: quiz._id,
           quizTitle: quiz.title || 'Untitled Quiz',
           subject: quiz.subject || 'General',
@@ -85,6 +87,10 @@ export default function ResultScreen({ route, navigation }) {
           timeTakenSeconds: timeSpentSeconds,
           questionBreakdown
         });
+        if (res && res.history) {
+          const prevHistory = getCachedHistory() || [];
+          setCachedHistory([res.history, ...prevHistory]);
+        }
         setHistorySaved(true);
       } catch (err) {
         console.warn('Error saving attempt history:', err.message);
@@ -112,6 +118,10 @@ export default function ResultScreen({ route, navigation }) {
       }
     } catch (err) {
       console.error('Error fetching AI explanation:', err);
+      Alert.alert(
+        'AI Explanation',
+        err.response?.data?.message || err.message || 'AI service is temporarily busy. Please try again in a moment!'
+      );
     } finally {
       setLoadingAiIdx(null);
     }

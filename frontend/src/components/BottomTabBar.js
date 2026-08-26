@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Home, BookOpen, Clock, User, GraduationCap } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -7,7 +7,7 @@ import { useTheme } from '../context/ThemeContext';
  * BottomTabBar component
  * Fixed bottom navigation bar featuring Home, Quizzes, Study, History, and Profile tabs.
  */
-export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
+function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
   const { isGlass } = useTheme();
 
   const handleStudyPress = () => {
@@ -28,7 +28,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <Home
           size={19}
-          color={activeTab === 'Home' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
+          color={activeTab === 'Home' ? (isGlass ? '#4f46e5' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
         <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Home' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Home
@@ -43,7 +43,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <BookOpen
           size={19}
-          color={activeTab === 'Quizzes' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
+          color={activeTab === 'Quizzes' ? (isGlass ? '#4f46e5' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
         <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Quizzes' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Quizzes
@@ -72,7 +72,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <Clock
           size={19}
-          color={activeTab === 'History' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
+          color={activeTab === 'History' ? (isGlass ? '#4f46e5' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
         <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'History' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           History
@@ -87,7 +87,7 @@ export default function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAd
       >
         <User
           size={19}
-          color={activeTab === 'Profile' ? (isGlass ? '#a78bfa' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
+          color={activeTab === 'Profile' ? (isGlass ? '#4f46e5' : '#818cf8') : (isGlass ? '#94a3b8' : '#64748b')}
         />
         <Text style={[styles.tabLabel, isGlass && styles.tabLabelGlass, activeTab === 'Profile' && (isGlass ? styles.activeTabLabelGlass : styles.activeTabLabel)]}>
           Profile
@@ -114,12 +114,13 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   footerContainerGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
-    borderTopColor: 'rgba(139, 92, 246, 0.3)',
-    borderTopWidth: 1.5,
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.2,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderTopColor: 'rgba(226, 232, 240, 0.9)',
+    borderTopWidth: 1,
+    shadowColor: '#64748b',
+    shadowOpacity: 0.08,
     shadowRadius: 10,
+    elevation: 4,
   },
   tabItem: {
     flex: 1,
@@ -134,14 +135,14 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   tabLabelGlass: {
-    color: '#94a3b8',
+    color: '#64748b',
   },
   activeTabLabel: {
     color: '#818cf8',
     fontWeight: '700',
   },
   activeTabLabelGlass: {
-    color: '#c084fc',
+    color: '#4f46e5',
     fontWeight: '800',
   },
   addTabItem: {
@@ -166,19 +167,20 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   addBtnCircleGlass: {
-    backgroundColor: '#7c3aed',
-    borderColor: 'rgba(15, 23, 42, 0.9)',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.5,
+    backgroundColor: '#4f46e5',
+    borderColor: '#ffffff',
+    shadowColor: '#4f46e5',
+    shadowOpacity: 0.35,
     shadowRadius: 8,
+    elevation: 5,
   },
   activeAddBtnCircle: {
     backgroundColor: '#818cf8',
     borderColor: '#6366f1',
   },
   activeAddBtnCircleGlass: {
-    backgroundColor: '#9333ea',
-    borderColor: '#c084fc',
+    backgroundColor: '#4338ca',
+    borderColor: '#ffffff',
   },
   addTabLabel: {
     fontSize: 10.5,
@@ -187,14 +189,16 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   addTabLabelGlass: {
-    color: '#c084fc',
+    color: '#4f46e5',
   },
   activeAddTabLabel: {
     color: '#a5b4fc',
     fontWeight: '800',
   },
   activeAddTabLabelGlass: {
-    color: '#e9d5ff',
+    color: '#4f46e5',
     fontWeight: '800',
   },
 });
+
+export default memo(BottomTabBar);

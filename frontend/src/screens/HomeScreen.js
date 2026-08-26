@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -28,6 +28,7 @@ import {
   X,
   SlidersHorizontal,
   Moon,
+  Sun,
 } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { fetchQuizzes, createQuizApi, fetchHistoryApi } from '../services/api';
@@ -35,14 +36,28 @@ import ManageQuizModal from '../components/ManageQuizModal';
 import TestConfigModal from '../components/TestConfigModal';
 import CustomQuizBuilderModal from '../components/CustomQuizBuilderModal';
 import BottomTabBar from '../components/BottomTabBar';
+import PageLoadingAnimation from '../components/PageLoadingAnimation';
+import {
+  getCachedQuizzes,
+  setCachedQuizzes,
+  getCachedHistory,
+  setCachedHistory,
+  setCachedUserProfile,
+} from '../services/appStateCache';
 
-export default function HomeScreen({ navigation, route }) {
+function HomeScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const { theme, isGlass, toggleTheme } = useTheme();
-  const [quizzes, setQuizzes] = useState([]);
-  const [historyList, setHistoryList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [quizzes, setQuizzes] = useState(getCachedQuizzes() || []);
+  const [historyList, setHistoryList] = useState(getCachedHistory() || []);
+  const [loading, setLoading] = useState(!getCachedQuizzes());
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('Home');
+
+  useEffect(() => {
+    if (route?.params?.user) {
+      setCachedUserProfile(route?.params?.user);
+    }
+  }, [route?.params?.user]);
 
   // Create Quiz Modal State
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -71,7 +86,7 @@ export default function HomeScreen({ navigation, route }) {
 
   const loadDashboardData = async (showSpinner = false) => {
     try {
-      if (showSpinner) {
+      if (showSpinner && !getCachedQuizzes()) {
         setLoading(true);
       }
       const [quizRes, historyRes] = await Promise.allSettled([
@@ -80,9 +95,11 @@ export default function HomeScreen({ navigation, route }) {
       ]);
 
       if (quizRes.status === 'fulfilled' && quizRes.value?.quizzes) {
+        setCachedQuizzes(quizRes.value.quizzes);
         setQuizzes(quizRes.value.quizzes);
       }
       if (historyRes.status === 'fulfilled' && historyRes.value?.history) {
+        setCachedHistory(historyRes.value.history);
         setHistoryList(historyRes.value.history);
       }
     } catch (err) {
@@ -90,13 +107,26 @@ export default function HomeScreen({ navigation, route }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      if (onReady) onReady();
     }
   };
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       setActiveTab('Home');
-      loadDashboardData(quizzes.length === 0);
+      const cachedQ = getCachedQuizzes();
+      const cachedH = getCachedHistory();
+      if (cachedQ) {
+        setQuizzes(cachedQ);
+        setLoading(false);
+      }
+      if (cachedH) {
+        setHistoryList(cachedH);
+      }
     }, [])
   );
 
@@ -148,39 +178,50 @@ export default function HomeScreen({ navigation, route }) {
 
   const handleTabPress = (tabName) => {
     setActiveTab(tabName);
-    if (tabName === 'Quizzes') {
-      navigation.navigate('Quizzes');
-    } else if (tabName === 'Study') {
-      navigation.navigate('Study');
-    } else if (tabName === 'History') {
-      navigation.navigate('History');
-    } else if (tabName === 'Profile') {
-      navigation.navigate('Profile', { user: route?.params?.user });
+    if (onTabPress) {
+      onTabPress(tabName);
+    } else {
+      if (tabName === 'Quizzes') {
+        navigation.navigate('Quizzes');
+      } else if (tabName === 'Study') {
+        navigation.navigate('Study');
+      } else if (tabName === 'History') {
+        navigation.navigate('History');
+      } else if (tabName === 'Profile') {
+        navigation.navigate('Profile', { user: route?.params?.user });
+      }
     }
   };
 
-  // Statistical Calculations
-  const totalQuizzes = quizzes.length;
-  const totalQuestions = quizzes.reduce(
-    (sum, q) => sum + (q.questions?.length || q.questionCount || 0),
-    0
-  );
-  const totalAttempts = historyList.length;
-
-  const averageAccuracy =
-    totalAttempts > 0
-      ? Math.round(
-          historyList.reduce(
-            (sum, item) => sum + (item.accuracyPercentage || 0),
-            0
-          ) / totalAttempts
-        )
-      : 0;
-
-  const totalCorrectCount = historyList.reduce(
-    (sum, item) => sum + (item.correctCount || 0),
-    0
-  );
+  // Statistical Calculations (Memoized)
+  const { totalQuizzes, totalQuestions, totalAttempts, averageAccuracy, totalCorrectCount } = useMemo(() => {
+    const totalQ = quizzes.length;
+    const totalQuestionsCount = quizzes.reduce(
+      (sum, q) => sum + (q.questions?.length || q.questionCount || 0),
+      0
+    );
+    const attempts = historyList.length;
+    const avg =
+      attempts > 0
+        ? Math.round(
+            historyList.reduce(
+              (sum, item) => sum + (item.accuracyPercentage || 0),
+              0
+            ) / attempts
+          )
+        : 0;
+    const correct = historyList.reduce(
+      (sum, item) => sum + (item.correctCount || 0),
+      0
+    );
+    return {
+      totalQuizzes: totalQ,
+      totalQuestions: totalQuestionsCount,
+      totalAttempts: attempts,
+      averageAccuracy: avg,
+      totalCorrectCount: correct,
+    };
+  }, [quizzes, historyList]);
 
   return (
     <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
@@ -188,13 +229,13 @@ export default function HomeScreen({ navigation, route }) {
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
           <View style={styles.brandTitleRow}>
-            <Text style={styles.brandTitle}>QUIZZY</Text>
+            <Text style={[styles.brandTitle, isGlass && styles.textDarkGlow]}>QUIZZY</Text>
             <View style={[styles.proTag, isGlass && styles.proTagGlass]}>
-              <Sparkles size={10} color={isGlass ? '#c084fc' : '#a855f7'} />
+              <Sparkles size={10} color={isGlass ? '#4f46e5' : '#a855f7'} />
               <Text style={[styles.proTagText, isGlass && styles.proTagTextGlass]}>AI Powered</Text>
             </View>
           </View>
-          <Text style={styles.brandSubtitle}>Custom Practice & Analytics</Text>
+          <Text style={[styles.brandSubtitle, isGlass && styles.textSubDark]}>Custom Practice & Analytics</Text>
         </View>
 
         <View style={styles.headerRightActions}>
@@ -206,13 +247,13 @@ export default function HomeScreen({ navigation, route }) {
           >
             {isGlass ? (
               <>
-                <Sparkles size={14} color="#c084fc" />
-                <Text style={styles.themeHeaderBtnTextGlass}>Glass UI</Text>
+                <Sun size={14} color="#4f46e5" />
+                <Text style={styles.themeHeaderBtnTextGlass}>Light</Text>
               </>
             ) : (
               <>
                 <Moon size={14} color="#94a3b8" />
-                <Text style={styles.themeHeaderBtnTextDark}>Dark UI</Text>
+                <Text style={styles.themeHeaderBtnTextDark}>Dark</Text>
               </>
             )}
           </TouchableOpacity>
@@ -226,23 +267,24 @@ export default function HomeScreen({ navigation, route }) {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={[isGlass ? '#a855f7' : '#6366f1']}
+            colors={[isGlass ? '#4f46e5' : '#6366f1']}
           />
         }
       >
         {loading ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color={isGlass ? '#a855f7' : '#6366f1'} />
-            <Text style={styles.loadingText}>Loading performance metrics...</Text>
-          </View>
+          <PageLoadingAnimation
+            title="Loading Dashboard..."
+            subtitle="Calculating accuracy, analytics & question banks..."
+            icon={Sparkles}
+          />
         ) : (
           <>
             {/* Overall Mastery Progress Banner */}
             <View style={[styles.masteryCard, isGlass && styles.masteryCardGlass]}>
               <View style={styles.masteryHeaderRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.masteryTitle}>Overall Progress</Text>
-                  <Text style={styles.masterySub}>Target Accuracy & Score Rate</Text>
+                  <Text style={[styles.masteryTitle, isGlass && styles.textDarkGlow]}>Overall Progress</Text>
+                  <Text style={[styles.masterySub, isGlass && styles.textSubDark]}>Target Accuracy & Score Rate</Text>
                 </View>
 
                 <View style={styles.masteryHeaderRightGroup}>
@@ -254,14 +296,14 @@ export default function HomeScreen({ navigation, route }) {
                   >
                     {isGlass ? (
                       <>
-                        <Sparkles size={11} color="#c084fc" />
-                        <Text style={styles.themePillTextGlass}>Glass UI</Text>
+                        <Sun size={11} color="#4f46e5" />
+                        <Text style={styles.themePillTextGlass}>Light</Text>
                         <View style={styles.themePillDotGlass} />
                       </>
                     ) : (
                       <>
                         <Moon size={11} color="#94a3b8" />
-                        <Text style={styles.themePillTextDark}>Dark UI</Text>
+                        <Text style={styles.themePillTextDark}>Dark</Text>
                         <View style={styles.themePillDotDark} />
                       </>
                     )}
@@ -291,54 +333,54 @@ export default function HomeScreen({ navigation, route }) {
                 <Text style={[styles.masteryFooterLeft, isGlass && styles.masteryFooterLeftGlass]}>
                   {totalCorrectCount} Total Correct Answers
                 </Text>
-                <Text style={styles.masteryFooterRight}>
+                <Text style={[styles.masteryFooterRight, isGlass && styles.textSubDark]}>
                   {totalAttempts} Tests Completed
                 </Text>
               </View>
             </View>
 
             {/* 4 Statistics Cards Grid */}
-            <Text style={styles.sectionTitle}>Performance Analytics</Text>
+            <Text style={[styles.sectionTitle, isGlass && styles.textDarkGlow]}>Performance Analytics</Text>
             <View style={styles.statsGrid}>
               {/* Total Quizzes Card */}
               <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.2)' }]}>
-                  <BookOpen size={18} color={isGlass ? '#a5b4fc' : '#818cf8'} />
+                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)' }]}>
+                  <BookOpen size={18} color={isGlass ? '#4f46e5' : '#818cf8'} />
                 </View>
-                <Text style={styles.statVal}>{totalQuizzes}</Text>
-                <Text style={styles.statLbl}>Available Quizzes</Text>
+                <Text style={[styles.statVal, isGlass && styles.textDarkGlow]}>{totalQuizzes}</Text>
+                <Text style={[styles.statLbl, isGlass && styles.textSubDark]}>Available Quizzes</Text>
               </View>
 
               {/* Total Question Bank Card */}
               <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
-                  <Zap size={18} color={isGlass ? '#d8b4fe' : '#c084fc'} />
+                <View style={[styles.statIconBadge, { backgroundColor: isGlass ? 'rgba(168, 85, 247, 0.12)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                  <Zap size={18} color={isGlass ? '#7c3aed' : '#c084fc'} />
                 </View>
-                <Text style={styles.statVal}>{totalQuestions}</Text>
-                <Text style={styles.statLbl}>Question Bank</Text>
+                <Text style={[styles.statVal, isGlass && styles.textDarkGlow]}>{totalQuestions}</Text>
+                <Text style={[styles.statLbl, isGlass && styles.textSubDark]}>Question Bank</Text>
               </View>
 
               {/* Test Attempts Card */}
               <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
+                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
                   <Target size={18} color="#10b981" />
                 </View>
-                <Text style={styles.statVal}>{totalAttempts}</Text>
-                <Text style={styles.statLbl}>Tests Taken</Text>
+                <Text style={[styles.statVal, isGlass && styles.textDarkGlow]}>{totalAttempts}</Text>
+                <Text style={[styles.statLbl, isGlass && styles.textSubDark]}>Tests Taken</Text>
               </View>
 
               {/* Average Accuracy Card */}
               <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
-                  <Award size={18} color="#fbbf24" />
+                <View style={[styles.statIconBadge, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+                  <Award size={18} color="#f59e0b" />
                 </View>
-                <Text style={styles.statVal}>{averageAccuracy}%</Text>
-                <Text style={styles.statLbl}>Avg Accuracy</Text>
+                <Text style={[styles.statVal, isGlass && styles.textDarkGlow]}>{averageAccuracy}%</Text>
+                <Text style={[styles.statLbl, isGlass && styles.textSubDark]}>Avg Accuracy</Text>
               </View>
             </View>
 
             {/* Organized Quick Hub Section */}
-            <Text style={styles.sectionTitle}>Quick Hub</Text>
+            <Text style={[styles.sectionTitle, isGlass && styles.textDarkGlow]}>Quick Hub</Text>
 
             {/* Explore Quiz Bank Card */}
             <TouchableOpacity
@@ -346,14 +388,14 @@ export default function HomeScreen({ navigation, route }) {
               onPress={() => navigation.navigate('Quizzes')}
               activeOpacity={0.8}
             >
-              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.2)' }]}>
-                <BookOpen size={22} color={isGlass ? '#a5b4fc' : '#818cf8'} />
+              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)' }]}>
+                <BookOpen size={22} color={isGlass ? '#4f46e5' : '#818cf8'} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.actionCardTitle}>Explore Quiz Directory</Text>
-                <Text style={styles.actionCardSub}>Browse {totalQuizzes} quizzes & practice MCQs</Text>
+                <Text style={[styles.actionCardTitle, isGlass && styles.textDarkGlow]}>Explore Quiz Directory</Text>
+                <Text style={[styles.actionCardSub, isGlass && styles.textSubDark]}>Browse {totalQuizzes} quizzes & practice MCQs</Text>
               </View>
-              <ChevronRight size={18} color="#64748b" />
+              <ChevronRight size={18} color={isGlass ? '#94a3b8' : '#64748b'} />
             </TouchableOpacity>
 
             {/* Build Custom Multi-Source Test Card */}
@@ -362,14 +404,14 @@ export default function HomeScreen({ navigation, route }) {
               onPress={() => setCustomBuilderVisible(true)}
               activeOpacity={0.8}
             >
-              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
-                <SlidersHorizontal size={22} color={isGlass ? '#d8b4fe' : '#c084fc'} />
+              <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(168, 85, 247, 0.12)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                <SlidersHorizontal size={22} color={isGlass ? '#7c3aed' : '#c084fc'} />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.actionCardTitle}>Build Multi-Source Test</Text>
-                <Text style={styles.actionCardSub}>Mix 100 Qs from Medicine + 100 Qs from Pediatrics</Text>
+                <Text style={[styles.actionCardTitle, isGlass && styles.textDarkGlow]}>Build Multi-Source Test</Text>
+                <Text style={[styles.actionCardSub, isGlass && styles.textSubDark]}>Mix 100 Qs from Medicine + 100 Qs from Pediatrics</Text>
               </View>
-              <ChevronRight size={18} color="#64748b" />
+              <ChevronRight size={18} color={isGlass ? '#94a3b8' : '#64748b'} />
             </TouchableOpacity>
 
             {/* Create New Quiz Card */}
@@ -378,26 +420,26 @@ export default function HomeScreen({ navigation, route }) {
               onPress={() => setCreateModalVisible(true)}
               activeOpacity={0.8}
             >
-              <View style={[styles.actionIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
+              <View style={[styles.actionIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
                 <Plus size={22} color="#10b981" />
               </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.actionCardTitle}>Create New Quiz</Text>
-                <Text style={styles.actionCardSub}>Add custom question bank & options</Text>
+                <Text style={[styles.actionCardTitle, isGlass && styles.textDarkGlow]}>Create New Quiz</Text>
+                <Text style={[styles.actionCardSub, isGlass && styles.textSubDark]}>Add custom question bank & options</Text>
               </View>
-              <ChevronRight size={18} color="#64748b" />
+              <ChevronRight size={18} color={isGlass ? '#94a3b8' : '#64748b'} />
             </TouchableOpacity>
 
             {/* Test Attempt History Card with Theme Mode Toggle on Top-Right */}
             <View style={[styles.historyCardContainer, isGlass && styles.historyCardContainerGlass]}>
               <View style={styles.historyCardHeaderRow}>
                 <View style={styles.historyCardTitleRow}>
-                  <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(192, 132, 252, 0.25)' : 'rgba(168, 85, 247, 0.2)' }]}>
-                    <Clock size={20} color={isGlass ? '#d8b4fe' : '#c084fc'} />
+                  <View style={[styles.actionIconBox, { backgroundColor: isGlass ? 'rgba(99, 102, 241, 0.12)' : 'rgba(168, 85, 247, 0.2)' }]}>
+                    <Clock size={20} color={isGlass ? '#4f46e5' : '#c084fc'} />
                   </View>
                   <View style={{ marginLeft: 10, flex: 1 }}>
-                    <Text style={styles.actionCardTitle}>Test Attempt History</Text>
-                    <Text style={styles.actionCardSub}>Review scorecards & analytics</Text>
+                    <Text style={[styles.actionCardTitle, isGlass && styles.textDarkGlow]}>Test Attempt History</Text>
+                    <Text style={[styles.actionCardSub, isGlass && styles.textSubDark]}>Review scorecards & analytics</Text>
                   </View>
                 </View>
 
@@ -409,14 +451,14 @@ export default function HomeScreen({ navigation, route }) {
                 >
                   {isGlass ? (
                     <>
-                      <Sparkles size={13} color="#c084fc" />
-                      <Text style={styles.themePillTextGlass}>Glass UI</Text>
+                      <Sun size={13} color="#4f46e5" />
+                      <Text style={styles.themePillTextGlass}>Light</Text>
                       <View style={styles.themePillDotGlass} />
                     </>
                   ) : (
                     <>
                       <Moon size={13} color="#94a3b8" />
-                      <Text style={styles.themePillTextDark}>Dark UI</Text>
+                      <Text style={styles.themePillTextDark}>Dark</Text>
                       <View style={styles.themePillDotDark} />
                     </>
                   )}
@@ -431,17 +473,17 @@ export default function HomeScreen({ navigation, route }) {
                 <Text style={[styles.historyCardActionText, isGlass && styles.historyCardActionTextGlass]}>
                   Open Full Attempt History & Explanations
                 </Text>
-                <ChevronRight size={16} color={isGlass ? '#c084fc' : '#818cf8'} />
+                <ChevronRight size={16} color={isGlass ? '#4f46e5' : '#818cf8'} />
               </TouchableOpacity>
             </View>
 
             {/* Daily AI Study Tip Box */}
             <View style={[styles.studyTipBox, isGlass && styles.studyTipBoxGlass]}>
               <View style={styles.tipHeaderRow}>
-                <Lightbulb size={16} color="#fbbf24" />
-                <Text style={styles.tipTitle}>AI Learning Insight</Text>
+                <Lightbulb size={16} color="#f59e0b" />
+                <Text style={[styles.tipTitle, isGlass && { color: '#4f46e5' }]}>AI Learning Insight</Text>
               </View>
-              <Text style={styles.tipText}>
+              <Text style={[styles.tipText, isGlass && styles.tipTextGlass]}>
                 Active recall with spaced MCQ testing improves long-term clinical retention by up to 75%. Try configuring custom 25-question random tests daily!
               </Text>
             </View>
@@ -633,11 +675,8 @@ const styles = StyleSheet.create({
     borderColor: '#475569',
   },
   themeHeaderBtnGlass: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    borderColor: '#c084fc',
-    shadowColor: '#c084fc',
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderColor: '#6366f1',
   },
   themeHeaderBtnTextDark: {
     fontSize: 11.5,
@@ -647,7 +686,7 @@ const styles = StyleSheet.create({
   themeHeaderBtnTextGlass: {
     fontSize: 11.5,
     fontWeight: '800',
-    color: '#e9d5ff',
+    color: '#4f46e5',
   },
   historyHeaderBtn: {
     flexDirection: 'row',
@@ -934,65 +973,69 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Glassmorphic Theme Overrides
+  // Glassmorphic Apple White Theme Overrides
   containerGlass: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#f2f2f7',
   },
   headerGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    borderBottomColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   proTagGlass: {
-    backgroundColor: 'rgba(168, 85, 247, 0.25)',
-    borderColor: '#c084fc',
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    borderColor: '#6366f1',
   },
   proTagTextGlass: {
-    color: '#e9d5ff',
+    color: '#4f46e5',
   },
   historyHeaderBtnGlass: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    borderColor: 'rgba(192, 132, 252, 0.5)',
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderColor: 'rgba(99, 102, 241, 0.3)',
   },
   historyHeaderBtnTextGlass: {
-    color: '#d8b4fe',
+    color: '#4f46e5',
   },
   masteryCardGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
-    borderColor: 'rgba(139, 92, 246, 0.35)',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.2,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.07,
     shadowRadius: 10,
-    elevation: 6,
+    elevation: 3,
   },
   masteryScoreBadgeGlass: {
-    backgroundColor: 'rgba(16, 185, 129, 0.25)',
-    borderColor: '#34d399',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderColor: '#10b981',
   },
   progressTrackGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    borderColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: '#f1f5f9',
+    borderColor: '#e2e8f0',
   },
   fillBarGlass: {
-    backgroundColor: '#9333ea',
+    backgroundColor: '#6366f1',
   },
   masteryFooterLeftGlass: {
-    color: '#c084fc',
+    color: '#4f46e5',
   },
   statBoxGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.15,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 2,
   },
   actionCardGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
-    borderColor: 'rgba(99, 102, 241, 0.25)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.15,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
     shadowRadius: 6,
-    elevation: 3,
+    elevation: 2,
   },
   historyCardContainer: {
     backgroundColor: '#1e293b',
@@ -1003,12 +1046,12 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
   historyCardContainerGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.68)',
-    borderColor: 'rgba(168, 85, 247, 0.35)',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 3,
   },
   historyCardHeaderRow: {
     flexDirection: 'row',
@@ -1036,12 +1079,12 @@ const styles = StyleSheet.create({
     borderColor: '#475569',
   },
   themePillToggleGlass: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    borderColor: '#c084fc',
-    shadowColor: '#c084fc',
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 3,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderColor: '#6366f1',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
   },
   themePillTextDark: {
     fontSize: 11,
@@ -1051,7 +1094,7 @@ const styles = StyleSheet.create({
   themePillTextGlass: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#e9d5ff',
+    color: '#4f46e5',
   },
   themePillDotDark: {
     width: 6,
@@ -1063,7 +1106,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#a855f7',
+    backgroundColor: '#6366f1',
   },
   historyCardActionBtn: {
     flexDirection: 'row',
@@ -1077,8 +1120,8 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
   historyCardActionBtnGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    borderColor: 'rgba(168, 85, 247, 0.3)',
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
   },
   historyCardActionText: {
     fontSize: 12,
@@ -1086,11 +1129,23 @@ const styles = StyleSheet.create({
     color: '#818cf8',
   },
   historyCardActionTextGlass: {
-    color: '#d8b4fe',
+    color: '#4f46e5',
     fontWeight: '700',
   },
   studyTipBoxGlass: {
-    backgroundColor: 'rgba(124, 58, 237, 0.15)',
-    borderColor: 'rgba(168, 85, 247, 0.35)',
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderLeftColor: '#6366f1',
+  },
+  textDarkGlow: {
+    color: '#0f172a',
+  },
+  textSubDark: {
+    color: '#64748b',
+  },
+  tipTextGlass: {
+    color: '#334155',
   },
 });
+
+export default memo(HomeScreen);

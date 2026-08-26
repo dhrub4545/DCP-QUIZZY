@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -27,10 +27,33 @@ import {
 import { changePasswordApi, fetchHistoryApi, setAuthToken } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 import BottomTabBar from '../components/BottomTabBar';
+import {
+  getCachedUserProfile,
+  setCachedUserProfile,
+  getCachedHistory,
+  setCachedHistory,
+} from '../services/appStateCache';
 
-export default function ProfileScreen({ navigation, route }) {
+function ProfileScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const { isGlass } = useTheme();
-  const user = route?.params?.user || { name: 'User Profile', email: 'student@quizzy.app' };
+  
+  const [profileUser, setProfileUser] = useState(
+    route?.params?.user || getCachedUserProfile() || { name: 'Student Account', email: 'student@quizzy.app' }
+  );
+
+  useEffect(() => {
+    if (route?.params?.user) {
+      setCachedUserProfile(route?.params?.user);
+      setProfileUser(route?.params?.user);
+    }
+  }, [route?.params?.user]);
+
+  // Initial stats from cached history
+  const initialHistory = getCachedHistory() || [];
+  const initialCount = initialHistory.length;
+  const initialAvg = initialCount > 0
+    ? Math.round(initialHistory.reduce((sum, item) => sum + (item.accuracyPercentage || 0), 0) / initialCount)
+    : 0;
 
   // Password Change Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -42,18 +65,22 @@ export default function ProfileScreen({ navigation, route }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
-  const [historyCount, setHistoryCount] = useState(0);
-  const [avgScore, setAvgScore] = useState(0);
+  const [historyCount, setHistoryCount] = useState(initialCount);
+  const [avgScore, setAvgScore] = useState(initialAvg);
 
   const loadProfileStats = async () => {
     try {
       const data = await fetchHistoryApi();
       if (data && data.history) {
-        setHistoryCount(data.history.length);
-        if (data.history.length > 0) {
+        setCachedHistory(data.history, data.total);
+        const count = data.history.length;
+        let avg = 0;
+        if (count > 0) {
           const totalAcc = data.history.reduce((sum, item) => sum + (item.accuracyPercentage || 0), 0);
-          setAvgScore(Math.round(totalAcc / data.history.length));
+          avg = Math.round(totalAcc / count);
         }
+        setHistoryCount(count);
+        setAvgScore(avg);
       }
     } catch (err) {
       console.warn('Failed to load profile history stats:', err.message);
@@ -62,6 +89,16 @@ export default function ProfileScreen({ navigation, route }) {
 
   useFocusEffect(
     useCallback(() => {
+      const cached = getCachedUserProfile();
+      if (cached) {
+        setProfileUser(cached);
+      }
+      const history = getCachedHistory();
+      if (history && history.length > 0) {
+        setHistoryCount(history.length);
+        const totalAcc = history.reduce((sum, item) => sum + (item.accuracyPercentage || 0), 0);
+        setAvgScore(Math.round(totalAcc / history.length));
+      }
       loadProfileStats();
     }, [])
   );
@@ -131,14 +168,18 @@ export default function ProfileScreen({ navigation, route }) {
   };
 
   const handleTabPress = (tabName) => {
-    if (tabName === 'Home') {
-      navigation.navigate('Home');
-    } else if (tabName === 'Quizzes') {
-      navigation.navigate('Quizzes');
-    } else if (tabName === 'Study') {
-      navigation.navigate('Study');
-    } else if (tabName === 'History') {
-      navigation.navigate('History');
+    if (onTabPress) {
+      onTabPress(tabName);
+    } else {
+      if (tabName === 'Home') {
+        navigation.navigate('Home');
+      } else if (tabName === 'Quizzes') {
+        navigation.navigate('Quizzes');
+      } else if (tabName === 'Study') {
+        navigation.navigate('Study');
+      } else if (tabName === 'History') {
+        navigation.navigate('History');
+      }
     }
   };
 
@@ -148,17 +189,17 @@ export default function ProfileScreen({ navigation, route }) {
         {/* Profile User Header Card */}
         <View style={[styles.userHeaderCard, isGlass && styles.userHeaderCardGlass]}>
           <View style={[styles.avatarCircle, isGlass && styles.avatarCircleGlass]}>
-            <Text style={styles.avatarText}>{getUserInitials(user.name)}</Text>
+            <Text style={styles.avatarText}>{getUserInitials(profileUser.name)}</Text>
           </View>
 
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{user.name || 'Student Account'}</Text>
+            <Text style={[styles.userName, isGlass && { color: '#0f172a' }]}>{profileUser.name || 'Student Account'}</Text>
             <View style={styles.emailRow}>
-              <Mail size={13} color="#94a3b8" style={{ marginRight: 4 }} />
-              <Text style={styles.userEmail}>{user.email || 'student@quizzy.app'}</Text>
+              <Mail size={13} color={isGlass ? '#64748b' : '#94a3b8'} style={{ marginRight: 4 }} />
+              <Text style={[styles.userEmail, isGlass && { color: '#64748b' }]}>{profileUser.email || 'student@quizzy.app'}</Text>
             </View>
             <View style={styles.activeBadge}>
-              <ShieldCheck size={12} color="#34d399" style={{ marginRight: 3 }} />
+              <ShieldCheck size={12} color="#10b981" style={{ marginRight: 3 }} />
               <Text style={styles.activeBadgeText}>Secured Account</Text>
             </View>
           </View>
@@ -167,81 +208,93 @@ export default function ProfileScreen({ navigation, route }) {
         {/* Account Performance Summary */}
         <View style={styles.statsRowContainer}>
           <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-            <Award size={18} color={isGlass ? '#c084fc' : '#818cf8'} style={{ marginBottom: 4 }} />
-            <Text style={styles.statNumber}>{historyCount}</Text>
-            <Text style={styles.statLabel}>Tests Attempted</Text>
+            <Award size={18} color={isGlass ? '#4f46e5' : '#818cf8'} style={{ marginBottom: 4 }} />
+            <Text style={[styles.statNumber, isGlass && { color: '#0f172a' }]}>{historyCount}</Text>
+            <Text style={[styles.statLabel, isGlass && { color: '#64748b' }]}>Tests Attempted</Text>
           </View>
 
           <View style={[styles.statBox, isGlass && styles.statBoxGlass]}>
-            <CheckCircle2 size={18} color="#34d399" style={{ marginBottom: 4 }} />
-            <Text style={styles.statNumber}>{avgScore}%</Text>
-            <Text style={styles.statLabel}>Avg Accuracy</Text>
+            <CheckCircle2 size={18} color="#10b981" style={{ marginBottom: 4 }} />
+            <Text style={[styles.statNumber, isGlass && { color: '#0f172a' }]}>{avgScore}%</Text>
+            <Text style={[styles.statLabel, isGlass && { color: '#64748b' }]}>Avg Accuracy</Text>
           </View>
         </View>
 
         {/* Change Password Card */}
         <View style={[styles.cardSection, isGlass && styles.cardSectionGlass]}>
           <View style={styles.cardHeaderRow}>
-            <KeyRound size={18} color={isGlass ? '#c084fc' : '#818cf8'} style={{ marginRight: 6 }} />
-            <Text style={styles.cardHeaderTitle}>Change Password</Text>
+            <KeyRound size={18} color={isGlass ? '#4f46e5' : '#818cf8'} style={{ marginRight: 6 }} />
+            <Text style={[styles.cardHeaderTitle, isGlass && { color: '#0f172a' }]}>Change Password</Text>
           </View>
-          <Text style={styles.cardHeaderSub}>
+          <Text style={[styles.cardHeaderSub, isGlass && { color: '#64748b' }]}>
             Update your account password to keep your profile secure.
           </Text>
 
           {/* Current Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Current Password</Text>
+            <Text style={[styles.inputLabel, isGlass && { color: '#334155' }]}>Current Password</Text>
             <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
-              <Lock size={15} color="#64748b" style={styles.inputIcon} />
+              <Lock size={15} color={isGlass ? '#64748b' : '#64748b'} style={styles.inputIcon} />
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, isGlass && { color: '#0f172a' }]}
                 secureTextEntry={!showCurrentPassword}
                 placeholder="Enter current password"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={isGlass ? '#94a3b8' : '#64748b'}
                 value={currentPassword}
                 onChangeText={setCurrentPassword}
               />
               <TouchableOpacity onPress={() => setShowCurrentPassword(!showCurrentPassword)}>
-                {showCurrentPassword ? <EyeOff size={16} color="#94a3b8" /> : <Eye size={16} color="#94a3b8" />}
+                {showCurrentPassword ? (
+                  <EyeOff size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                ) : (
+                  <Eye size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
 
           {/* New Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>New Password</Text>
+            <Text style={[styles.inputLabel, isGlass && { color: '#334155' }]}>New Password</Text>
             <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
-              <Lock size={15} color="#64748b" style={styles.inputIcon} />
+              <Lock size={15} color={isGlass ? '#64748b' : '#64748b'} style={styles.inputIcon} />
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, isGlass && { color: '#0f172a' }]}
                 secureTextEntry={!showNewPassword}
                 placeholder="At least 6 characters"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={isGlass ? '#94a3b8' : '#64748b'}
                 value={newPassword}
                 onChangeText={setNewPassword}
               />
               <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)}>
-                {showNewPassword ? <EyeOff size={16} color="#94a3b8" /> : <Eye size={16} color="#94a3b8" />}
+                {showNewPassword ? (
+                  <EyeOff size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                ) : (
+                  <Eye size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Confirm New Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Confirm New Password</Text>
+            <Text style={[styles.inputLabel, isGlass && { color: '#334155' }]}>Confirm New Password</Text>
             <View style={[styles.passwordInputWrapper, isGlass && styles.passwordInputWrapperGlass]}>
-              <Lock size={15} color="#64748b" style={styles.inputIcon} />
+              <Lock size={15} color={isGlass ? '#64748b' : '#64748b'} style={styles.inputIcon} />
               <TextInput
-                style={styles.passwordInput}
+                style={[styles.passwordInput, isGlass && { color: '#0f172a' }]}
                 secureTextEntry={!showConfirmPassword}
                 placeholder="Re-enter new password"
-                placeholderTextColor="#64748b"
+                placeholderTextColor={isGlass ? '#94a3b8' : '#64748b'}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
               />
               <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-                {showConfirmPassword ? <EyeOff size={16} color="#94a3b8" /> : <Eye size={16} color="#94a3b8" />}
+                {showConfirmPassword ? (
+                  <EyeOff size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                ) : (
+                  <Eye size={16} color={isGlass ? '#64748b' : '#94a3b8'} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -261,8 +314,11 @@ export default function ProfileScreen({ navigation, route }) {
         </View>
 
         {/* Logout Section */}
-        <View style={styles.cardSection}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+        <View style={[styles.cardSection, isGlass && styles.cardSectionGlass]}>
+          <TouchableOpacity
+            style={[styles.logoutBtn, isGlass && styles.logoutBtnGlass]}
+            onPress={handleLogout}
+          >
             <LogOut size={18} color="#ef4444" style={{ marginRight: 8 }} />
             <Text style={styles.logoutBtnText}>Log Out Account</Text>
           </TouchableOpacity>
@@ -453,47 +509,53 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Glassmorphic Theme Overrides
+  // Glassmorphic Apple White Theme Overrides
   containerGlass: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#f2f2f7',
   },
   userHeaderCardGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
-    borderColor: 'rgba(139, 92, 246, 0.35)',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 5,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
   },
   avatarCircleGlass: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#c084fc',
+    backgroundColor: '#4f46e5',
+    borderColor: '#ffffff',
   },
   statBoxGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.15,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  cardSectionGlass: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  passwordInputWrapperGlass: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+  },
+  updateBtnGlass: {
+    backgroundColor: '#4f46e5',
+    shadowColor: '#4f46e5',
+    shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 3,
   },
-  cardSectionGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  passwordInputWrapperGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderColor: 'rgba(139, 92, 246, 0.25)',
-  },
-  updateBtnGlass: {
-    backgroundColor: '#9333ea',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 4,
+  logoutBtnGlass: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
   },
 });
+
+export default memo(ProfileScreen);

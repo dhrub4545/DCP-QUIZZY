@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -36,11 +36,13 @@ import ManageQuizModal from '../components/ManageQuizModal';
 import TestConfigModal from '../components/TestConfigModal';
 import CustomQuizBuilderModal from '../components/CustomQuizBuilderModal';
 import BottomTabBar from '../components/BottomTabBar';
+import PageLoadingAnimation from '../components/PageLoadingAnimation';
+import { getCachedQuizzes, setCachedQuizzes } from '../services/appStateCache';
 
-export default function QuizzesScreen({ navigation }) {
+function QuizzesScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const { isGlass } = useTheme();
-  const [quizzes, setQuizzes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [quizzes, setQuizzes] = useState(getCachedQuizzes() || []);
+  const [loading, setLoading] = useState(!getCachedQuizzes());
   const [refreshing, setRefreshing] = useState(false);
   
   // Quiz Category Switcher: 'standard' (Admin) vs 'custom' (User)
@@ -61,11 +63,12 @@ export default function QuizzesScreen({ navigation }) {
 
   const loadQuizzes = async (showSpinner = false) => {
     try {
-      if (showSpinner) {
+      if (showSpinner && !getCachedQuizzes()) {
         setLoading(true);
       }
       const data = await fetchQuizzes();
       if (data && data.quizzes) {
+        setCachedQuizzes(data.quizzes);
         setQuizzes(data.quizzes);
       } else {
         setQuizzes([]);
@@ -75,37 +78,50 @@ export default function QuizzesScreen({ navigation }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      if (onReady) onReady();
     }
   };
 
+  useEffect(() => {
+    loadQuizzes();
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      loadQuizzes(quizzes.length === 0);
-
-      const onBackPress = () => {
-        if (configModalVisible) {
-          setConfigModalVisible(false);
-          return true;
-        }
-        if (manageModalVisible) {
-          setManageModalVisible(false);
-          return true;
-        }
-        if (customBuilderVisible) {
-          setCustomBuilderVisible(false);
-          return true;
-        }
-        if (searchQuery && searchQuery.trim()) {
-          setSearchQuery('');
-          return true;
-        }
-        return false;
-      };
-
-      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-      return () => subscription.remove();
-    }, [configModalVisible, manageModalVisible, customBuilderVisible, searchQuery])
+      const cached = getCachedQuizzes();
+      if (cached) {
+        setQuizzes(cached);
+        setLoading(false);
+      }
+    }, [])
   );
+
+  useEffect(() => {
+    if (isActiveTab === false && !configModalVisible && !manageModalVisible && !customBuilderVisible) return;
+
+    const onBackPress = () => {
+      if (configModalVisible) {
+        setConfigModalVisible(false);
+        return true;
+      }
+      if (manageModalVisible) {
+        setManageModalVisible(false);
+        return true;
+      }
+      if (customBuilderVisible) {
+        setCustomBuilderVisible(false);
+        return true;
+      }
+      if (searchQuery && searchQuery.trim()) {
+        setSearchQuery('');
+        return true;
+      }
+      return false;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [isActiveTab, configModalVisible, manageModalVisible, customBuilderVisible, searchQuery]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -154,66 +170,72 @@ export default function QuizzesScreen({ navigation }) {
     setConfigModalVisible(true);
   };
 
-  const isNmcleQuiz = (q) => {
+  const isNmcleQuiz = useCallback((q) => {
     const t = (q.title || '').toUpperCase();
     const s = (q.subject || '').toUpperCase();
     return t.includes('NMCLE') || s.includes('NMCLE');
-  };
+  }, []);
 
-  const isCustomQuiz = (q) => {
+  const isCustomQuiz = useCallback((q) => {
     if (q.isCustom === true) return true;
     if (q.creator === 'user') return true;
     const titleLower = (q.title || '').toLowerCase();
     if (titleLower.includes('custom') || titleLower.includes('combined')) return true;
     return false;
-  };
+  }, []);
 
-  const isBookQuiz = (q) => {
+  const isBookQuiz = useCallback((q) => {
     return !isNmcleQuiz(q) && !isCustomQuiz(q);
-  };
+  }, [isNmcleQuiz, isCustomQuiz]);
 
-  const nmcleQuizzes = quizzes.filter(isNmcleQuiz);
-  const bookQuizzes = quizzes.filter(isBookQuiz);
-  const customQuizzes = quizzes.filter(isCustomQuiz);
+  const nmcleQuizzes = useMemo(() => quizzes.filter(isNmcleQuiz), [quizzes, isNmcleQuiz]);
+  const bookQuizzes = useMemo(() => quizzes.filter(isBookQuiz), [quizzes, isBookQuiz]);
+  const customQuizzes = useMemo(() => quizzes.filter(isCustomQuiz), [quizzes, isCustomQuiz]);
 
-  let currentCategoryQuizzes = quizzes;
-  if (quizCategory === 'nmcle') currentCategoryQuizzes = nmcleQuizzes;
-  else if (quizCategory === 'book') currentCategoryQuizzes = bookQuizzes;
-  else if (quizCategory === 'custom') currentCategoryQuizzes = customQuizzes;
+  const currentCategoryQuizzes = useMemo(() => {
+    if (quizCategory === 'nmcle') return nmcleQuizzes;
+    if (quizCategory === 'book') return bookQuizzes;
+    if (quizCategory === 'custom') return customQuizzes;
+    return quizzes;
+  }, [quizCategory, nmcleQuizzes, bookQuizzes, customQuizzes, quizzes]);
 
-  // Filter quizzes by search query (Shows ALL when search is blank)
-  const filteredQuizzes = currentCategoryQuizzes.filter((q) => {
-    if (!searchQuery || !searchQuery.trim()) return true;
+  // Filter quizzes by search query (Memoized)
+  const filteredQuizzes = useMemo(() => {
+    if (!searchQuery || !searchQuery.trim()) return currentCategoryQuizzes;
     const query = searchQuery.toLowerCase().trim();
-    return (
-      (q.title && q.title.toLowerCase().includes(query)) ||
-      (q.subject && q.subject.toLowerCase().includes(query)) ||
-      (q.description && q.description.toLowerCase().includes(query)) ||
-      (Array.isArray(q.topics) && q.topics.some((t) => t && t.toLowerCase().includes(query)))
-    );
-  });
+    return currentCategoryQuizzes.filter((q) => {
+      return (
+        (q.title && q.title.toLowerCase().includes(query)) ||
+        (q.subject && q.subject.toLowerCase().includes(query)) ||
+        (q.description && q.description.toLowerCase().includes(query)) ||
+        (Array.isArray(q.topics) && q.topics.some((t) => t && t.toLowerCase().includes(query)))
+      );
+    });
+  }, [currentCategoryQuizzes, searchQuery]);
 
   const handleTabPress = (tabName) => {
-    if (tabName === 'Home') {
-      navigation.navigate('Home');
-    } else if (tabName === 'Study') {
-      navigation.navigate('Study');
-    } else if (tabName === 'History') {
-      navigation.navigate('History');
-    } else if (tabName === 'Profile') {
-      navigation.navigate('Profile');
+    if (onTabPress) {
+      onTabPress(tabName);
+    } else {
+      if (tabName === 'Home') {
+        navigation.navigate('Home');
+      } else if (tabName === 'Study') {
+        navigation.navigate('Study');
+      } else if (tabName === 'History') {
+        navigation.navigate('History');
+      } else if (tabName === 'Profile') {
+        navigation.navigate('Profile');
+      }
     }
   };
 
   return (
     <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      
       {/* Header Bar */}
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Quiz Directory</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={[styles.headerTitle, isGlass && { color: '#0f172a' }]}>Quiz Directory</Text>
+          <Text style={[styles.headerSubtitle, isGlass && { color: '#64748b' }]}>
             {quizCategory === 'nmcle'
               ? `${nmcleQuizzes.length} NMCLE Exam Sets`
               : quizCategory === 'book'
@@ -252,11 +274,12 @@ export default function QuizzesScreen({ navigation }) {
           >
             <FolderKanban
               size={13}
-              color={quizCategory === 'all' ? '#ffffff' : '#94a3b8'}
+              color={quizCategory === 'all' ? '#ffffff' : (isGlass ? '#64748b' : '#94a3b8')}
             />
             <Text
               style={[
                 styles.sectionBtnText,
+                isGlass && { color: '#64748b' },
                 quizCategory === 'all' && styles.sectionBtnTextActive,
               ]}
             >
@@ -275,11 +298,12 @@ export default function QuizzesScreen({ navigation }) {
           >
             <Shield
               size={13}
-              color={quizCategory === 'nmcle' ? '#ffffff' : '#818cf8'}
+              color={quizCategory === 'nmcle' ? '#ffffff' : (isGlass ? '#4f46e5' : '#818cf8')}
             />
             <Text
               style={[
                 styles.sectionBtnText,
+                isGlass && { color: '#64748b' },
                 quizCategory === 'nmcle' && styles.sectionBtnTextActive,
               ]}
             >
@@ -298,11 +322,12 @@ export default function QuizzesScreen({ navigation }) {
           >
             <BookOpen
               size={13}
-              color={quizCategory === 'book' ? '#ffffff' : '#38bdf8'}
+              color={quizCategory === 'book' ? '#ffffff' : (isGlass ? '#0284c7' : '#38bdf8')}
             />
             <Text
               style={[
                 styles.sectionBtnText,
+                isGlass && { color: '#64748b' },
                 quizCategory === 'book' && styles.sectionBtnTextActive,
               ]}
             >
@@ -322,11 +347,12 @@ export default function QuizzesScreen({ navigation }) {
             >
               <UserCheck
                 size={13}
-                color={quizCategory === 'custom' ? '#ffffff' : '#fbbf24'}
+                color={quizCategory === 'custom' ? '#ffffff' : (isGlass ? '#d97706' : '#fbbf24')}
               />
               <Text
                 style={[
                   styles.sectionBtnText,
+                  isGlass && { color: '#64748b' },
                   quizCategory === 'custom' && styles.sectionBtnTextActive,
                 ]}
               >
@@ -348,35 +374,31 @@ export default function QuizzesScreen({ navigation }) {
           onPress={() => searchInputRef.current?.focus()}
         >
           <View style={styles.searchIconBox} pointerEvents="none">
-            <Search size={14} color={isSearchFocused ? '#c084fc' : '#818cf8'} />
+            <Search size={14} color={isSearchFocused ? '#4f46e5' : (isGlass ? '#64748b' : '#818cf8')} />
           </View>
 
           <TextInput
             ref={searchInputRef}
-            style={styles.modernSearchInput}
+            style={[styles.modernSearchInput, isGlass && { color: '#0f172a' }]}
             placeholder={
               quizCategory === 'standard'
                 ? 'Type any keyword, title or topic...'
                 : 'Search custom user quizzes...'
             }
+            placeholderTextColor={isGlass ? '#94a3b8' : '#64748b'}
             value={searchQuery}
             onChangeText={setSearchQuery}
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
-            placeholderTextColor="#64748b"
-            editable={true}
             returnKeyType="search"
-            autoCapitalize="none"
-            autoCorrect={false}
           />
 
-          {searchQuery ? (
+          {searchQuery.length > 0 ? (
             <TouchableOpacity
+              onPress={handleClearSearch}
               style={styles.clearSearchBtn}
-              onPress={() => setSearchQuery('')}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <X size={14} color="#94a3b8" />
+              <X size={15} color={isGlass ? '#64748b' : '#94a3b8'} />
             </TouchableOpacity>
           ) : null}
         </Pressable>
@@ -384,19 +406,20 @@ export default function QuizzesScreen({ navigation }) {
 
       {/* Quiz List */}
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#6366f1" />
-          <Text style={styles.loadingText}>Loading quizzes...</Text>
-        </View>
+        <PageLoadingAnimation
+          title="Loading Quizzes..."
+          subtitle="Fetching NMCLE sets, medical books & question banks..."
+          icon={BookOpen}
+        />
       ) : filteredQuizzes.length === 0 ? (
         <View style={styles.emptyContainer}>
           {quizCategory === 'custom' ? (
             <>
               <SlidersHorizontal size={44} color="#a855f7" />
-              <Text style={styles.emptyTitle}>
+              <Text style={[styles.emptyTitle, isGlass && { color: '#0f172a' }]}>
                 {searchQuery ? 'No Matching Custom Quizzes' : 'No Custom Quizzes Created Yet'}
               </Text>
-              <Text style={styles.emptySubtitle}>
+              <Text style={[styles.emptySubtitle, isGlass && { color: '#64748b' }]}>
                 {searchQuery
                   ? 'Try a different search term.'
                   : 'Create your own personalized custom tests from specific topics or custom question banks!'}
@@ -412,9 +435,9 @@ export default function QuizzesScreen({ navigation }) {
             </>
           ) : (
             <>
-              <BookOpen size={44} color="#475569" />
-              <Text style={styles.emptyTitle}>No Admin Quizzes Found</Text>
-              <Text style={styles.emptySubtitle}>
+              <BookOpen size={44} color={isGlass ? '#94a3b8' : '#475569'} />
+              <Text style={[styles.emptyTitle, isGlass && { color: '#0f172a' }]}>No Admin Quizzes Found</Text>
+              <Text style={[styles.emptySubtitle, isGlass && { color: '#64748b' }]}>
                 No quizzes match "{searchQuery}". Try a different keyword.
               </Text>
             </>
@@ -450,59 +473,59 @@ export default function QuizzesScreen({ navigation }) {
                       style={[
                         styles.categoryBadge,
                         isCustomItem
-                          ? { backgroundColor: 'rgba(168, 85, 247, 0.2)', borderColor: '#a855f7' }
-                          : { backgroundColor: 'rgba(99, 102, 241, 0.2)', borderColor: '#6366f1' },
+                          ? { backgroundColor: isGlass ? 'rgba(168, 85, 247, 0.12)' : 'rgba(168, 85, 247, 0.2)', borderColor: isGlass ? '#9333ea' : '#a855f7' }
+                          : { backgroundColor: isGlass ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.2)', borderColor: isGlass ? '#4f46e5' : '#6366f1' },
                       ]}
                     >
                       {isCustomItem ? (
-                        <UserCheck size={11} color="#c084fc" style={{ marginRight: 4 }} />
+                        <UserCheck size={11} color={isGlass ? '#7c3aed' : '#c084fc'} style={{ marginRight: 4 }} />
                       ) : (
-                        <Shield size={11} color="#818cf8" style={{ marginRight: 4 }} />
+                        <Shield size={11} color={isGlass ? '#4f46e5' : '#818cf8'} style={{ marginRight: 4 }} />
                       )}
                       <Text
                         style={[
                           styles.categoryBadgeText,
-                          isCustomItem ? { color: '#c084fc' } : { color: '#818cf8' },
+                          isCustomItem ? { color: isGlass ? '#7c3aed' : '#c084fc' } : { color: isGlass ? '#4f46e5' : '#818cf8' },
                         ]}
                       >
                         {isCustomItem ? 'CUSTOM QUIZ' : 'ADMIN QUIZ'}
                       </Text>
                     </View>
 
-                    <View style={styles.subjectBadge}>
-                      <Text style={styles.subjectBadgeText}>{item.subject || 'General'}</Text>
+                    <View style={[styles.subjectBadge, isGlass && { backgroundColor: 'rgba(241, 245, 249, 0.9)' }]}>
+                      <Text style={[styles.subjectBadgeText, isGlass && { color: '#475569' }]}>{item.subject || 'General'}</Text>
                     </View>
                   </View>
 
-                  <Text style={styles.dateText}>
+                  <Text style={[styles.dateText, isGlass && { color: '#94a3b8' }]}>
                     {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}
                   </Text>
                 </View>
 
-                <Text style={styles.quizTitle}>{item.title}</Text>
+                <Text style={[styles.quizTitle, isGlass && { color: '#0f172a' }]}>{item.title}</Text>
                 {item.description ? (
-                  <Text style={styles.quizDesc} numberOfLines={2}>
+                  <Text style={[styles.quizDesc, isGlass && { color: '#64748b' }]} numberOfLines={2}>
                     {item.description}
                   </Text>
                 ) : null}
 
                 <View style={styles.quizMetaRow}>
                   <View style={styles.metaItem}>
-                    <Layers size={14} color="#818cf8" />
-                    <Text style={styles.metaText}>
+                    <Layers size={14} color={isGlass ? '#4f46e5' : '#818cf8'} />
+                    <Text style={[styles.metaText, isGlass && { color: '#475569' }]}>
                       {qCount} {qCount === 1 ? 'Question' : 'Questions'}
                     </Text>
                   </View>
                 </View>
 
                 {/* Card Action Buttons */}
-                <View style={styles.cardBtnRow}>
+                <View style={[styles.cardBtnRow, isGlass && { borderTopColor: 'rgba(226, 232, 240, 0.9)' }]}>
                   <TouchableOpacity
-                    style={styles.manageBtn}
+                    style={[styles.manageBtn, isGlass && { backgroundColor: 'rgba(241, 245, 249, 0.85)', borderColor: 'rgba(226, 232, 240, 0.9)' }]}
                     onPress={() => handleOpenManageQuestions(item)}
                   >
-                    <Edit3 size={14} color="#818cf8" />
-                    <Text style={styles.manageBtnText}>Manage</Text>
+                    <Edit3 size={14} color={isGlass ? '#4f46e5' : '#818cf8'} />
+                    <Text style={[styles.manageBtnText, isGlass && { color: '#4f46e5' }]}>Manage</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -515,7 +538,7 @@ export default function QuizzesScreen({ navigation }) {
 
                   {isCustomItem ? (
                     <TouchableOpacity
-                      style={styles.deleteBtn}
+                      style={[styles.deleteBtn, isGlass && { backgroundColor: 'rgba(241, 245, 249, 0.85)', borderColor: 'rgba(226, 232, 240, 0.9)' }]}
                       onPress={() => handleDeleteQuiz(item._id, item.title)}
                     >
                       <Trash2 size={15} color="#ef4444" />
@@ -881,42 +904,48 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
 
-  // Glassmorphism Theme Overrides
+  // Glassmorphism Apple White Theme Overrides
   containerGlass: {
-    backgroundColor: '#090d16',
+    backgroundColor: '#f2f2f7',
   },
   headerGlass: {
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    borderBottomColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   buildCustomHeaderBtnGlass: {
-    backgroundColor: '#9333ea',
-    shadowColor: '#a855f7',
-    shadowOpacity: 0.4,
+    backgroundColor: '#4f46e5',
+    shadowColor: '#4f46e5',
+    shadowOpacity: 0.25,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 3,
   },
   sectionSwitcherWrapperGlass: {
     backgroundColor: 'transparent',
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: '#e2e8f0',
   },
   sectionBtnGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.55)',
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
   },
   modernSearchBoxGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.15,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.05,
     shadowRadius: 6,
   },
   quizCardGlass: {
-    backgroundColor: 'rgba(30, 41, 59, 0.65)',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#6366f1',
-    shadowOpacity: 0.18,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 2,
   },
 });
+
+export default memo(QuizzesScreen);

@@ -9,10 +9,11 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Clock, ArrowLeft, ArrowRight, CheckCircle, HelpCircle, X } from 'lucide-react-native';
+import { Clock, ArrowLeft, ArrowRight, CheckCircle, HelpCircle, X, Target } from 'lucide-react-native';
 import { fetchQuizById } from '../services/api';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import ZoomableImageCard from '../components/ZoomableImageCard';
+import PageLoadingAnimation from '../components/PageLoadingAnimation';
 
 export default function TestScreen({ route, navigation }) {
   const {
@@ -147,10 +148,11 @@ export default function TestScreen({ route, navigation }) {
 
   if (loading || !quiz) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#6366f1" />
-        <Text style={styles.loadingText}>Loading Quiz Questions...</Text>
-      </View>
+      <PageLoadingAnimation
+        title="Preparing Test Environment..."
+        subtitle="Loading questions, timer & answer options..."
+        icon={Target}
+      />
     );
   }
 

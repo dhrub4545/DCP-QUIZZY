@@ -26,7 +26,10 @@ export function getBackendBaseUrl() {
 
   // In dev mode (Expo Go), use local LAN server for faster debugging
   if (__DEV__) {
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
+    const hostUri =
+      Constants.expoConfig?.hostUri ||
+      Constants.manifest2?.extra?.expoClient?.hostUri ||
+      Constants.manifest?.debuggerHost;
     if (hostUri) {
       const ip = hostUri.split(':')[0];
       if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
@@ -34,7 +37,7 @@ export function getBackendBaseUrl() {
       }
     }
     if (Platform.OS === 'android') {
-      return 'http://192.168.100.14:5000/api';
+      return 'http://192.168.1.243:5000/api';
     }
     return 'http://localhost:5000/api';
   }
@@ -47,11 +50,12 @@ export const API_BASE_URL = getBackendBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 45000,
+  timeout: 0, // 0 = No client-side timeout; wait until backend sends response or error
 });
 
 // Secure Request Interceptor: Attach JWT Bearer Token to all outgoing requests
 api.interceptors.request.use((config) => {
+  config.baseURL = getBackendBaseUrl();
   if (authToken) {
     config.headers.Authorization = `Bearer ${authToken}`;
   }
@@ -159,14 +163,14 @@ export const deleteHistoryApi = async (id) => {
   return response.data;
 };
 
-// AI Engine APIs
+// AI Engine APIs (Wait indefinitely until the backend completes or returns its error message)
 export const fetchAiExplanationApi = async (questionData) => {
-  const response = await api.post('/ai/explain', questionData);
+  const response = await api.post('/ai/explain', questionData, { timeout: 0 });
   return response.data;
 };
 
 export const sendAiChatApi = async (chatPayload) => {
-  const response = await api.post('/ai/chat', chatPayload);
+  const response = await api.post('/ai/chat', chatPayload, { timeout: 0 });
   return response.data;
 };
 

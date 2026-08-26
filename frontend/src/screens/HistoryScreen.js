@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -32,15 +32,23 @@ import {
   deleteHistoryApi,
   fetchAiExplanationApi,
 } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import ZoomableImageCard from '../components/ZoomableImageCard';
 import AiChatModal from '../components/AiChatModal';
 import BottomTabBar from '../components/BottomTabBar';
+import {
+  getCachedHistory,
+  getCachedHistoryTotal,
+  setCachedHistory,
+  appendCachedHistory,
+  removeCachedHistoryItem,
+} from '../services/appStateCache';
 
 // ----------------------------------------------------
 // Card Loading Skeleton Animation Component
 // ----------------------------------------------------
-const HistoryCardSkeleton = () => {
+const HistoryCardSkeleton = ({ isGlass }) => {
   const pulseAnim = useRef(new Animated.Value(0.35)).current;
 
   useEffect(() => {
@@ -63,30 +71,33 @@ const HistoryCardSkeleton = () => {
   }, [pulseAnim]);
 
   return (
-    <Animated.View style={[styles.card, styles.skeletonCard, { opacity: pulseAnim }]}>
+    <Animated.View style={[styles.card, styles.skeletonCard, isGlass && styles.cardGlass, { opacity: pulseAnim }]}>
       <View style={styles.cardHeader}>
-        <View style={styles.skeletonBadge} />
-        <View style={styles.skeletonDate} />
+        <View style={[styles.skeletonBadge, isGlass && { backgroundColor: '#e2e8f0' }]} />
+        <View style={[styles.skeletonDate, isGlass && { backgroundColor: '#e2e8f0' }]} />
       </View>
-      <View style={styles.skeletonTitle} />
-      <View style={styles.skeletonSubject} />
+      <View style={[styles.skeletonTitle, isGlass && { backgroundColor: '#e2e8f0' }]} />
+      <View style={[styles.skeletonSubject, isGlass && { backgroundColor: '#e2e8f0' }]} />
       <View style={styles.statsRow}>
-        <View style={styles.skeletonChip} />
-        <View style={styles.skeletonChip} />
+        <View style={[styles.skeletonChip, isGlass && { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' }]} />
+        <View style={[styles.skeletonChip, isGlass && { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' }]} />
       </View>
     </Animated.View>
   );
 };
 
-export default function HistoryScreen({ navigation }) {
-  // Paginated History State
-  const [historyList, setHistoryList] = useState([]);
-  const [loading, setLoading] = useState(true);
+function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+  const { isGlass } = useTheme();
+
+  // Paginated History State (initialized with instant shared cache)
+  const cachedHistory = getCachedHistory();
+  const [historyList, setHistoryList] = useState(cachedHistory || []);
+  const [loading, setLoading] = useState(!cachedHistory);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [totalCount, setTotalCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(getCachedHistoryTotal() || 0);
 
   const isLoadingRef = useRef(false);
 
@@ -108,7 +119,7 @@ export default function HistoryScreen({ navigation }) {
     if (isLoadingRef.current) return;
     try {
       isLoadingRef.current = true;
-      if (pageToFetch === 1 && !isRefresh) {
+      if (pageToFetch === 1 && !isRefresh && !getCachedHistory()) {
         setLoading(true);
       } else if (pageToFetch > 1) {
         setLoadingMore(true);
@@ -117,8 +128,10 @@ export default function HistoryScreen({ navigation }) {
       const data = await fetchHistoryApi(pageToFetch, 15);
       if (data && Array.isArray(data.history)) {
         if (pageToFetch === 1) {
+          setCachedHistory(data.history, data.total);
           setHistoryList(data.history);
         } else {
+          appendCachedHistory(data.history);
           setHistoryList((prev) => {
             const existingIds = new Set(prev.map((item) => item._id));
             const newItems = data.history.filter((item) => !existingIds.has(item._id));
@@ -138,12 +151,22 @@ export default function HistoryScreen({ navigation }) {
       setLoading(false);
       setRefreshing(false);
       setLoadingMore(false);
+      if (onReady) onReady();
     }
   };
 
+  useEffect(() => {
+    loadHistory(1);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      loadHistory(1);
+      const currentCache = getCachedHistory();
+      if (currentCache) {
+        setHistoryList(currentCache);
+        setTotalCount(getCachedHistoryTotal());
+        setLoading(false);
+      }
     }, [])
   );
 
@@ -226,6 +249,10 @@ export default function HistoryScreen({ navigation }) {
       }
     } catch (err) {
       console.error('Error fetching AI explanation:', err);
+      Alert.alert(
+        'AI Explanation',
+        err.response?.data?.message || err.message || 'AI service is temporarily busy. Please try again in a moment!'
+      );
     } finally {
       setLoadingAiIdx(null);
     }
@@ -321,6 +348,7 @@ export default function HistoryScreen({ navigation }) {
                 key={optIdx}
                 style={[
                   styles.reviewOptionRow,
+                  isGlass && styles.reviewOptionRowGlass,
                   isAnswer && styles.reviewOptionAnswer,
                   isUserChoice && !isAnswer && styles.reviewOptionWrong,
                 ]}
@@ -328,55 +356,56 @@ export default function HistoryScreen({ navigation }) {
                 <Text
                   style={[
                     styles.optLetter,
+                    isGlass && { color: '#64748b' },
                     isAnswer && { color: '#10b981', fontWeight: '700' },
                   ]}
                 >
                   {letter}.
                 </Text>
-                <Text style={styles.optText}>{opt}</Text>
+                <Text style={[styles.optText, isGlass && { color: '#334155' }]}>{opt}</Text>
               </View>
             );
           })}
         </View>
 
         {q.explanation ? (
-          <View style={styles.expBox}>
-            <Text style={styles.expTitle}>Printed Explanation:</Text>
+          <View style={[styles.expBox, isGlass && styles.expBoxGlass]}>
+            <Text style={[styles.expTitle, isGlass && { color: '#4f46e5' }]}>Printed Explanation:</Text>
             <MarkdownRenderer
               content={q.explanation}
               explanationImage={explanationPicUrl}
-              theme="dark"
+              theme={isGlass ? 'light' : 'dark'}
             />
           </View>
         ) : null}
 
         {/* AI Generated Explanation Card */}
         {aiExplanations[idx] && (
-          <View style={styles.aiExpBox}>
-            <View style={styles.aiExpHeader}>
+          <View style={[styles.aiExpBox, isGlass && styles.aiExpBoxGlass]}>
+            <View style={[styles.aiExpHeader, isGlass && { borderBottomColor: 'rgba(168, 85, 247, 0.2)' }]}>
               <View style={styles.aiBadge}>
                 <Sparkles size={11} color="#ffffff" />
                 <Text style={styles.aiBadgeText}>GEMINI 3.6 FLASH AI</Text>
               </View>
-              <Text style={styles.aiExpTitle}>In-Depth Explanation</Text>
+              <Text style={[styles.aiExpTitle, isGlass && { color: '#7c3aed' }]}>In-Depth Explanation</Text>
             </View>
-            <MarkdownRenderer content={aiExplanations[idx]} />
+            <MarkdownRenderer content={aiExplanations[idx]} theme={isGlass ? 'light' : 'dark'} />
           </View>
         )}
 
         {/* AI Action Buttons Row */}
         <View style={styles.aiBtnRow}>
           <TouchableOpacity
-            style={styles.aiExplainBtn}
+            style={[styles.aiExplainBtn, isGlass && styles.aiExplainBtnGlass]}
             onPress={() => handleGenerateAiExplanation(q, idx)}
             disabled={loadingAiIdx === idx}
           >
             {loadingAiIdx === idx ? (
-              <ActivityIndicator size="small" color="#c084fc" />
+              <ActivityIndicator size="small" color={isGlass ? '#7c3aed' : '#c084fc'} />
             ) : (
               <>
-                <Lightbulb size={14} color="#c084fc" />
-                <Text style={styles.aiExplainBtnText}>
+                <Lightbulb size={14} color={isGlass ? '#7c3aed' : '#c084fc'} />
+                <Text style={[styles.aiExplainBtnText, isGlass && { color: '#7c3aed' }]}>
                   {aiExplanations[idx]
                     ? 'Regenerate AI Explanation'
                     : 'Generate AI Explanation'}
@@ -397,33 +426,116 @@ export default function HistoryScreen({ navigation }) {
     );
   };
 
+  const renderHistoryCard = useCallback(({ item }) => {
+    const badge = getScoreBadge(item.accuracyPercentage || 0);
+    const dateStr = item.completedAt
+      ? new Date(item.completedAt).toLocaleDateString()
+      : '';
+    const timeStr = item.completedAt
+      ? new Date(item.completedAt).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '';
+
+    return (
+      <TouchableOpacity
+        style={[styles.card, isGlass && styles.cardGlass]}
+        activeOpacity={0.7}
+        onPress={() => handleOpenDetail(item)}
+      >
+        <View style={styles.cardHeader}>
+          <View
+            style={[
+              styles.badge,
+              {
+                backgroundColor: badge.bg,
+                borderColor: badge.border,
+              },
+            ]}
+          >
+            <Award size={13} color={badge.color} />
+            <Text style={[styles.badgeText, { color: badge.color }]}>
+              {badge.title}
+            </Text>
+          </View>
+          <View style={styles.dateRow}>
+            <Calendar
+              size={11}
+              color="#64748b"
+              style={{ marginRight: 4 }}
+            />
+            <Text style={[styles.dateText, isGlass && { color: '#64748b' }]}>
+              {dateStr} • {timeStr}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.quizTitle, isGlass && { color: '#0f172a' }]} numberOfLines={1}>
+          {item.quizTitle}
+        </Text>
+        <Text style={[styles.subjectText, isGlass && { color: '#64748b' }]}>
+          {item.subject || 'General'}
+        </Text>
+
+        <View style={styles.statsRow}>
+          <View style={[styles.statChip, isGlass && styles.statChipGlass]}>
+            <CheckCircle2 size={12.5} color="#10b981" />
+            <Text style={[styles.statChipText, isGlass && { color: '#334155' }]}>
+              {item.correctCount} / {item.totalQuestions} Correct
+            </Text>
+          </View>
+
+          <View style={[styles.statChip, isGlass && styles.statChipGlass]}>
+            <Clock size={12.5} color={isGlass ? '#4f46e5' : '#818cf8'} />
+            <Text style={[styles.statChipText, isGlass && { color: '#334155' }]}>
+              {formatTime(item.timeTakenSeconds)}
+            </Text>
+          </View>
+
+          <View style={{ flex: 1 }} />
+
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={() =>
+              handleDeleteAttempt(item._id, item.quizTitle)
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Trash2 size={14} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [isGlass]);
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
       {/* Header Bar */}
-      <View style={styles.header}>
+      <View style={[styles.header, isGlass && styles.headerGlass]}>
         <TouchableOpacity
           style={styles.backBtn}
-          onPress={() => navigation.goBack()}
+          onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Home'))}
         >
-          <ArrowLeft size={22} color="#f8fafc" />
+          <ArrowLeft size={22} color={isGlass ? '#0f172a' : '#f8fafc'} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Test Attempt History</Text>
+        <Text style={[styles.headerTitle, isGlass && { color: '#0f172a' }]}>Test Attempt History</Text>
         <View style={{ width: 22 }} />
       </View>
 
       {/* Body */}
       {loading ? (
         <View style={styles.listPadding}>
-          <HistoryCardSkeleton />
-          <HistoryCardSkeleton />
-          <HistoryCardSkeleton />
-          <HistoryCardSkeleton />
+          <HistoryCardSkeleton isGlass={isGlass} />
+          <HistoryCardSkeleton isGlass={isGlass} />
+          <HistoryCardSkeleton isGlass={isGlass} />
+          <HistoryCardSkeleton isGlass={isGlass} />
         </View>
       ) : historyList.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Clock size={56} color="#475569" />
-          <Text style={styles.emptyTitle}>No Test History Yet</Text>
-          <Text style={styles.emptySubtitle}>
+          <Clock size={56} color={isGlass ? '#94a3b8' : '#475569'} />
+          <Text style={[styles.emptyTitle, isGlass && { color: '#0f172a' }]}>No Test History Yet</Text>
+          <Text style={[styles.emptySubtitle, isGlass && { color: '#64748b' }]}>
             Complete your first test to see your performance history and detailed
             scorecards here!
           </Text>
@@ -433,6 +545,10 @@ export default function HistoryScreen({ navigation }) {
           data={historyList}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listPadding}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.4}
           refreshControl={
@@ -446,102 +562,21 @@ export default function HistoryScreen({ navigation }) {
             <View>
               {loadingMore ? (
                 <View style={styles.footerLoader}>
-                  <ActivityIndicator size="small" color="#818cf8" />
-                  <Text style={styles.footerLoaderText}>
+                  <ActivityIndicator size="small" color={isGlass ? '#4f46e5' : '#818cf8'} />
+                  <Text style={[styles.footerLoaderText, isGlass && { color: '#4f46e5' }]}>
                     Loading more test history...
                   </Text>
                 </View>
               ) : !hasMore && historyList.length >= 8 ? (
                 <View style={styles.endHistoryFooter}>
-                  <Text style={styles.endHistoryText}>
+                  <Text style={[styles.endHistoryText, isGlass && { color: '#64748b' }]}>
                     All {totalCount || historyList.length} test attempts loaded
                   </Text>
                 </View>
               ) : null}
             </View>
           }
-          renderItem={({ item }) => {
-            const badge = getScoreBadge(item.accuracyPercentage || 0);
-            const dateStr = item.completedAt
-              ? new Date(item.completedAt).toLocaleDateString()
-              : '';
-            const timeStr = item.completedAt
-              ? new Date(item.completedAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : '';
-
-            return (
-              <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.7}
-                onPress={() => handleOpenDetail(item)}
-              >
-                <View style={styles.cardHeader}>
-                  <View
-                    style={[
-                      styles.badge,
-                      {
-                        backgroundColor: badge.bg,
-                        borderColor: badge.border,
-                      },
-                    ]}
-                  >
-                    <Award size={13} color={badge.color} />
-                    <Text style={[styles.badgeText, { color: badge.color }]}>
-                      {badge.title}
-                    </Text>
-                  </View>
-                  <View style={styles.dateRow}>
-                    <Calendar
-                      size={11}
-                      color="#64748b"
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text style={styles.dateText}>
-                      {dateStr} • {timeStr}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.quizTitle} numberOfLines={1}>
-                  {item.quizTitle}
-                </Text>
-                <Text style={styles.subjectText}>
-                  {item.subject || 'General'}
-                </Text>
-
-                <View style={styles.statsRow}>
-                  <View style={styles.statChip}>
-                    <CheckCircle2 size={12.5} color="#10b981" />
-                    <Text style={styles.statChipText}>
-                      {item.correctCount} / {item.totalQuestions} Correct
-                    </Text>
-                  </View>
-
-                  <View style={styles.statChip}>
-                    <Clock size={12.5} color="#818cf8" />
-                    <Text style={styles.statChipText}>
-                      {formatTime(item.timeTakenSeconds)}
-                    </Text>
-                  </View>
-
-                  <View style={{ flex: 1 }} />
-
-                  <TouchableOpacity
-                    style={styles.deleteBtn}
-                    onPress={() =>
-                      handleDeleteAttempt(item._id, item.quizTitle)
-                    }
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Trash2 size={14} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
+          renderItem={renderHistoryCard}
         />
       )}
 
@@ -549,14 +584,18 @@ export default function HistoryScreen({ navigation }) {
       <BottomTabBar
         activeTab="History"
         onTabPress={(tab) => {
-          if (tab === 'Home') {
-            navigation.navigate('Home');
-          } else if (tab === 'Quizzes') {
-            navigation.navigate('Quizzes');
-          } else if (tab === 'Study') {
-            navigation.navigate('Study');
-          } else if (tab === 'Profile') {
-            navigation.navigate('Profile');
+          if (onTabPress) {
+            onTabPress(tab);
+          } else {
+            if (tab === 'Home') {
+              navigation.navigate('Home');
+            } else if (tab === 'Quizzes') {
+              navigation.navigate('Quizzes');
+            } else if (tab === 'Study') {
+              navigation.navigate('Study');
+            } else if (tab === 'Profile') {
+              navigation.navigate('Profile');
+            }
           }
         }}
       />
@@ -568,13 +607,13 @@ export default function HistoryScreen({ navigation }) {
         transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
+        <SafeAreaView style={[styles.modalContainer, isGlass && styles.modalContainerGlass]}>
+          <View style={[styles.modalHeader, isGlass && styles.modalHeaderGlass]}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalTitle} numberOfLines={1}>
+              <Text style={[styles.modalTitle, isGlass && { color: '#0f172a' }]} numberOfLines={1}>
                 {selectedAttempt?.quizTitle || 'Attempt Review'}
               </Text>
-              <Text style={styles.modalSub}>
+              <Text style={[styles.modalSub, isGlass && { color: '#64748b' }]}>
                 Score: {selectedAttempt?.accuracyPercentage}% •{' '}
                 {selectedAttempt?.correctCount}/{selectedAttempt?.totalQuestions}{' '}
                 Correct
@@ -584,14 +623,14 @@ export default function HistoryScreen({ navigation }) {
               style={styles.modalCloseBtn}
               onPress={() => setModalVisible(false)}
             >
-              <X size={24} color="#94a3b8" />
+              <X size={24} color={isGlass ? '#0f172a' : '#94a3b8'} />
             </TouchableOpacity>
           </View>
 
           {modalLoading ? (
             <View style={styles.modalCenterContainer}>
               <ActivityIndicator size="large" color="#6366f1" />
-              <Text style={styles.modalLoadingText}>
+              <Text style={[styles.modalLoadingText, isGlass && { color: '#64748b' }]}>
                 Loading question breakdown...
               </Text>
             </View>
@@ -994,4 +1033,72 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: 4,
   },
+
+  // Glassmorphic Apple White Theme Overrides
+  containerGlass: {
+    backgroundColor: '#f2f2f7',
+  },
+  headerGlass: {
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  cardGlass: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  statChipGlass: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#e2e8f0',
+  },
+  modalContainerGlass: {
+    backgroundColor: '#f2f2f7',
+  },
+  modalHeaderGlass: {
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  reviewCardGlass: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  reviewOptionRowGlass: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  expBoxGlass: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  aiExpBoxGlass: {
+    backgroundColor: '#faf5ff',
+    borderColor: 'rgba(168, 85, 247, 0.3)',
+    shadowColor: '#a855f7',
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  aiExplainBtnGlass: {
+    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+    borderColor: '#a855f7',
+  },
 });
+
+export default memo(HistoryScreen);
