@@ -54,3 +54,13 @@ export const setCachedStudyProgress = (progress) => {
     studyProgressCache = progress;
   }
 };
+
+let studyStructureCache = null;
+
+export const getCachedStudyStructure = () => studyStructureCache;
+export const setCachedStudyStructure = (structure) => {
+  if (structure && typeof structure === 'object') {
+    studyStructureCache = structure;
+  }
+};
+

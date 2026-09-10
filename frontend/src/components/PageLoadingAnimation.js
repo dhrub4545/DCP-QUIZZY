@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Animated, ActivityIndicator, Modal } from 'react-native';
 import { Sparkles } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 
@@ -8,6 +8,7 @@ export default function PageLoadingAnimation({
   subtitle = 'Please wait a moment while we prepare your content',
   icon: IconComponent = Sparkles,
   fullScreen = false,
+  onDismiss,
 }) {
   const { isGlass } = useTheme();
   const pulseAnim = useRef(new Animated.Value(0.4)).current;
@@ -57,8 +58,8 @@ export default function PageLoadingAnimation({
     return () => pulse.stop();
   }, [pulseAnim, scaleAnim, barAnim]);
 
-  return (
-    <View style={[styles.container, fullScreen && styles.fullScreenContainer, isGlass ? styles.containerGlass : styles.containerDark]}>
+  const loadingContent = (
+    <>
       <Animated.View
         style={[
           styles.iconGlowWrapper,
@@ -71,12 +72,12 @@ export default function PageLoadingAnimation({
 
       <ActivityIndicator size="large" color={isGlass ? '#4f46e5' : '#6366f1'} style={styles.spinner} />
 
-      <Text style={[styles.title, isGlass ? styles.titleGlass : styles.titleDark]}>
+      <Text style={[styles.title, isGlass ? styles.titleGlass : styles.titleDark]} numberOfLines={2}>
         {title}
       </Text>
       
       {subtitle ? (
-        <Text style={[styles.subtitle, isGlass ? styles.subtitleGlass : styles.subtitleDark]}>
+        <Text style={[styles.subtitle, isGlass ? styles.subtitleGlass : styles.subtitleDark]} numberOfLines={3}>
           {subtitle}
         </Text>
       ) : null}
@@ -93,6 +94,30 @@ export default function PageLoadingAnimation({
           ]}
         />
       </View>
+    </>
+  );
+
+  if (fullScreen) {
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+        onRequestClose={onDismiss || (() => {})}
+      >
+        <View style={[styles.modalBackdrop, isGlass ? styles.modalBackdropGlass : styles.modalBackdropDark]}>
+          <View style={[styles.modalCard, isGlass ? styles.modalCardGlass : styles.modalCardDark]}>
+            {loadingContent}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  return (
+    <View style={[styles.container, isGlass ? styles.containerGlass : styles.containerDark]}>
+      {loadingContent}
     </View>
   );
 }
@@ -103,10 +128,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-  },
-  fullScreenContainer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 9999,
+    minHeight: 280,
   },
   containerDark: {
     backgroundColor: '#0f172a',
@@ -114,30 +136,67 @@ const styles = StyleSheet.create({
   containerGlass: {
     backgroundColor: '#f2f2f7',
   },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalBackdropDark: {
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+  },
+  modalBackdropGlass: {
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  modalCard: {
+    width: '88%',
+    maxWidth: 340,
+    borderRadius: 20,
+    paddingVertical: 26,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 14,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+  },
+  modalCardDark: {
+    backgroundColor: '#1e293b',
+    borderColor: '#334155',
+    borderWidth: 1.5,
+    shadowColor: '#000',
+  },
+  modalCardGlass: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderWidth: 1.5,
+    shadowColor: '#475569',
+  },
   iconGlowWrapper: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
     borderWidth: 1.5,
   },
   iconGlowWrapperDark: {
-    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    backgroundColor: 'rgba(99, 102, 241, 0.18)',
     borderColor: '#6366f1',
     shadowColor: '#6366f1',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
     elevation: 4,
   },
   iconGlowWrapperGlass: {
-    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+    backgroundColor: 'rgba(79, 70, 229, 0.12)',
     borderColor: '#4f46e5',
     shadowColor: '#4f46e5',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 3,
   },
@@ -178,7 +237,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   progressTrackDark: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#334155',
   },
   progressTrackGlass: {
     backgroundColor: '#e2e8f0',

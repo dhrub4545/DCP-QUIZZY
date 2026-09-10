@@ -12,6 +12,21 @@ function formatCellText(text) {
   return cleaned;
 }
 
+function cleanTableHeaderText(text) {
+  if (!text) return '';
+  let cleaned = cleanLatexFormulas(String(text).trim());
+  cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
+  cleaned = cleaned.replace(/<\/?(b|strong)>/gi, '');
+  cleaned = cleaned.replace(/<\/?u>/gi, '');
+  // Collapse consecutive bold tokens like **** **** or ******* into a space
+  cleaned = cleaned.replace(/\*{2,}\s*\*{2,}/g, ' ');
+  // Remove markdown bold asterisks ** (e.g. **Header** or ** Header** -> Header)
+  cleaned = cleaned.replace(/\*{2,}/g, '');
+  // Remove backticks
+  cleaned = cleaned.replace(/`+/g, '');
+  return cleaned.trim();
+}
+
 function normalizeTableRows(headers, rawRows) {
   if (!rawRows || !Array.isArray(rawRows)) return [];
   const normalizedRows = [];
@@ -46,30 +61,6 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [rawTableHeight, setRawTableHeight] = useState(0);
 
-  const scale = useRef(new Animated.Value(1)).current;
-  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const currentScale = useRef(1);
-  const currentPan = useRef({ x: 0, y: 0 });
-
-  const initialDistanceRef = useRef(null);
-  const initialScaleRef = useRef(1.0);
-  const initialFocalRef = useRef({ x: 0, y: 0 });
-  const initialPanRef = useRef({ x: 0, y: 0 });
-  const lastTapRef = useRef(0);
-
-  useEffect(() => {
-    const sSub = scale.addListener((v) => {
-      currentScale.current = v.value;
-    });
-    const pSub = pan.addListener((v) => {
-      currentPan.current = v;
-    });
-    return () => {
-      scale.removeListener(sSub);
-      pan.removeListener(pSub);
-    };
-  }, []);
-
   const synchronizedRows = normalizeTableRows(block.headers, block.rows);
   const colCount = Math.max(block.headers.length, (synchronizedRows[0] || []).length, 1);
   const A4_WIDTH = 760;
@@ -77,14 +68,77 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
   // Proportional scale factor to fit full A4 width within mobile window card
   const containerWidth = Math.min(SCREEN_WIDTH - 52, 480);
   const scaleRatio = Number((containerWidth / A4_WIDTH).toFixed(4));
-  const estimatedHeight = Math.max(120, (synchronizedRows.length + 1) * 38);
+  const estimatedHeight = Math.max(120, (synchronizedRows.length + 1) * 44);
   const inlineHeight = (rawTableHeight > 0 ? rawTableHeight : estimatedHeight) * scaleRatio;
 
+  // Natural overview scale: guarantees both width and height fit completely within screen (zero overflow)
+  const currentTblHeight = rawTableHeight > 0 ? rawTableHeight : estimatedHeight;
+  const maxModalW = SCREEN_WIDTH - 24;
+  const maxModalH = SCREEN_HEIGHT * 0.82;
+  const scaleToFitWidth = maxModalW / A4_WIDTH;
+  const scaleToFitHeight = maxModalH / Math.max(100, currentTblHeight);
+  const initialTableScale = Number(Math.max(0.18, Math.min(scaleToFitWidth, scaleToFitHeight, 1.0)).toFixed(3));
+
+  const scale = useRef(new Animated.Value(initialTableScale)).current;
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const backdropOpacity = useRef(new Animated.Value(1)).current;
+  const currentScale = useRef(initialTableScale);
+  const currentPan = useRef({ x: 0, y: 0 });
+
+  // Native gallery gesture baseline tracking refs
+  const gestureMode = useRef('none'); // 'none' | 'pinch' | 'pan'
+  const pinchStartDist = useRef(1);
+  const pinchStartScale = useRef(initialTableScale);
+  const pinchOrigin = useRef({ x: 0, y: 0 });
+  const panStartTouch = useRef({ x: 0, y: 0 });
+  const panStartPan = useRef({ x: 0, y: 0 });
+  const touchStartTime = useRef(0);
+  const lastTapTime = useRef(0);
+  const resetTimerRef = useRef(null);
+  const isDismissing = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const sSub = scale.addListener((v) => {
+      if (!isDismissing.current) {
+        currentScale.current = v.value;
+      }
+    });
+    const pSub = pan.addListener((v) => {
+      if (!isDismissing.current) {
+        currentPan.current = v;
+      }
+    });
+    return () => {
+      scale.removeListener(sSub);
+      pan.removeListener(pSub);
+    };
+  }, []);
+
   const resetTableZoom = (animated = true) => {
+    currentScale.current = initialTableScale;
+    currentPan.current = { x: 0, y: 0 };
+    gestureMode.current = 'none';
+    pinchStartDist.current = 1;
+    pinchStartScale.current = initialTableScale;
+    pinchOrigin.current = { x: 0, y: 0 };
+    panStartTouch.current = { x: 0, y: 0 };
+    panStartPan.current = { x: 0, y: 0 };
+
+    pan.stopAnimation();
+    scale.stopAnimation();
+
     if (animated) {
       Animated.parallel([
         Animated.spring(scale, {
-          toValue: 1,
+          toValue: initialTableScale,
           useNativeDriver: true,
           bounciness: 4,
           speed: 16,
@@ -95,21 +149,28 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
           bounciness: 4,
           speed: 16,
         }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
       ]).start();
     } else {
-      scale.setValue(1);
+      scale.setValue(initialTableScale);
       pan.setValue({ x: 0, y: 0 });
+      backdropOpacity.setValue(1);
     }
   };
 
   const clampTablePanToBounds = (s) => {
     const tblH = rawTableHeight || estimatedHeight;
-    const maxPanX = Math.max(0, (A4_WIDTH * s - SCREEN_WIDTH) / 2 + 50);
-    const maxPanY = Math.max(0, (tblH * s - SCREEN_HEIGHT) / 2 + 50);
+    const maxPanX = Math.max(0, (A4_WIDTH * s - SCREEN_WIDTH) / 2 + 30);
+    const maxPanY = Math.max(0, (tblH * s - SCREEN_HEIGHT) / 2 + 30);
     const targetX = Math.max(-maxPanX, Math.min(maxPanX, currentPan.current.x));
     const targetY = Math.max(-maxPanY, Math.min(maxPanY, currentPan.current.y));
 
-    if (targetX !== currentPan.current.x || targetY !== currentPan.current.y) {
+    if (Math.abs(targetX - currentPan.current.x) > 1 || Math.abs(targetY - currentPan.current.y) > 1) {
+      currentPan.current = { x: targetX, y: targetY };
       Animated.spring(pan, {
         toValue: { x: targetX, y: targetY },
         useNativeDriver: true,
@@ -119,18 +180,51 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
     }
   };
 
+  const handleOpenModal = () => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    isDismissing.current = false;
+    resetTableZoom(false);
+    backdropOpacity.setValue(1);
+    setModalVisible(true);
+  };
+
+  const handleCloseModal = () => {
+    if (isDismissing.current) return;
+    isDismissing.current = true;
+    Animated.timing(backdropOpacity, {
+      toValue: 0,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(() => {
+      setModalVisible(false);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => {
+        isDismissing.current = false;
+        resetTableZoom(false);
+      }, 350);
+    });
+  };
+
   const handleDoubleTapAt = (touchX, touchY) => {
-    if (currentScale.current > 1.1) {
+    if (currentScale.current > initialTableScale * 1.15) {
       resetTableZoom(true);
     } else {
-      const targetScale = 1.9;
-      const targetPanX = (SCREEN_WIDTH / 2 - touchX) * (targetScale - 1);
-      const targetPanY = (SCREEN_HEIGHT / 2 - touchY) * (targetScale - 1);
+      const targetScale = Math.max(initialTableScale * 2.5, 1.2);
+      const targetPanX = (SCREEN_WIDTH / 2 - touchX) * (targetScale - initialTableScale);
+      const targetPanY = (SCREEN_HEIGHT / 2 - touchY) * (targetScale - initialTableScale);
 
       const maxPanX = Math.max(0, (A4_WIDTH * targetScale - SCREEN_WIDTH) / 2);
       const maxPanY = Math.max(0, ((rawTableHeight || estimatedHeight) * targetScale - SCREEN_HEIGHT) / 2);
       const boundedPanX = Math.max(-maxPanX, Math.min(maxPanX, targetPanX));
       const boundedPanY = Math.max(-maxPanY, Math.min(maxPanY, targetPanY));
+
+      currentScale.current = targetScale;
+      currentPan.current = { x: boundedPanX, y: boundedPanY };
 
       Animated.parallel([
         Animated.spring(scale, {
@@ -145,123 +239,258 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
           bounciness: 4,
           speed: 16,
         }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
       ]).start();
     }
+  };
+
+  const startPinch = (t1, t2) => {
+    const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+    if (dist < 5) return;
+    gestureMode.current = 'pinch';
+    pinchStartDist.current = dist;
+    pinchStartScale.current = currentScale.current;
+    const centerX = (t1.pageX + t2.pageX) / 2;
+    const centerY = (t1.pageY + t2.pageY) / 2;
+    pinchOrigin.current = {
+      x: (centerX - SCREEN_WIDTH / 2 - currentPan.current.x) / (pinchStartScale.current || 1),
+      y: (centerY - SCREEN_HEIGHT / 2 - currentPan.current.y) / (pinchStartScale.current || 1),
+    };
   };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (evt, gs) => {
-        return (
-          evt.nativeEvent.touches.length >= 2 ||
-          Math.abs(gs.dx) > 3 ||
-          Math.abs(gs.dy) > 3
-        );
-      },
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+
       onPanResponderGrant: (evt) => {
-        if (evt.nativeEvent.touches.length === 2) {
-          const [t1, t2] = evt.nativeEvent.touches;
-          initialDistanceRef.current = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-          initialScaleRef.current = currentScale.current;
-          initialFocalRef.current = {
-            x: (t1.pageX + t2.pageX) / 2,
-            y: (t1.pageY + t2.pageY) / 2,
-          };
-          initialPanRef.current = { ...currentPan.current };
-        } else if (evt.nativeEvent.touches.length === 1) {
-          const now = Date.now();
-          const touch = evt.nativeEvent.touches[0];
-          if (now - lastTapRef.current < 300) {
-            handleDoubleTapAt(touch.pageX, touch.pageY);
-            lastTapRef.current = 0;
-          } else {
-            lastTapRef.current = now;
-            initialPanRef.current = { ...currentPan.current };
-          }
+        if (isDismissing.current) return;
+        const touches = evt.nativeEvent.touches;
+        touchStartTime.current = Date.now();
+
+        if (touches.length >= 2) {
+          startPinch(touches[0], touches[1]);
+        } else if (touches.length === 1) {
+          gestureMode.current = 'pan';
+          panStartTouch.current = { x: touches[0].pageX, y: touches[0].pageY };
+          panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+          pinchStartDist.current = null;
         }
       },
       onPanResponderMove: (evt, gs) => {
-        if (evt.nativeEvent.touches.length === 2) {
-          const [t1, t2] = evt.nativeEvent.touches;
-          const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-          const currentFocal = {
-            x: (t1.pageX + t2.pageX) / 2,
-            y: (t1.pageY + t2.pageY) / 2,
-          };
+        if (isDismissing.current) return;
+        const touches = evt.nativeEvent.touches;
 
-          if (initialDistanceRef.current && initialDistanceRef.current > 0) {
-            const factor = dist / initialDistanceRef.current;
-            const newScale = Math.min(Math.max(initialScaleRef.current * factor, 0.75), 3.5);
+        // TWO FINGERS PINCH TO ZOOM & PAN (TRUE GALLERY ENGINE)
+        if (touches.length >= 2) {
+          const t1 = touches[0];
+          const t2 = touches[1];
+          const curDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+          if (curDist < 5) return;
 
-            const focalShiftX =
-              (currentFocal.x - SCREEN_WIDTH / 2) * (1 - newScale / initialScaleRef.current);
-            const focalShiftY =
-              (currentFocal.y - SCREEN_HEIGHT / 2) * (1 - newScale / initialScaleRef.current);
-            const deltaFocalX = currentFocal.x - initialFocalRef.current.x;
-            const deltaFocalY = currentFocal.y - initialFocalRef.current.y;
-
-            const nextPanX = initialPanRef.current.x + deltaFocalX + focalShiftX;
-            const nextPanY = initialPanRef.current.y + deltaFocalY + focalShiftY;
-
-            scale.setValue(newScale);
-            pan.setValue({ x: nextPanX, y: nextPanY });
-          } else {
-            initialDistanceRef.current = dist;
-            initialScaleRef.current = currentScale.current;
-            initialFocalRef.current = currentFocal;
-            initialPanRef.current = { ...currentPan.current };
+          // Seamless transition if 2nd finger just arrived
+          if (gestureMode.current !== 'pinch' || !pinchStartDist.current) {
+            startPinch(t1, t2);
+            return;
           }
-        } else if (evt.nativeEvent.touches.length === 1) {
-          const nextPanX = initialPanRef.current.x + gs.dx;
-          const nextPanY = initialPanRef.current.y + gs.dy;
-          pan.setValue({
-            x: nextPanX,
-            y: nextPanY,
-          });
+
+          // Compute scale directly from baseline anchor (ZERO frame-to-frame noise)
+          const rawScale = (curDist / pinchStartDist.current) * pinchStartScale.current;
+          let effectiveScale = rawScale;
+
+          // Elastic rubberband resistance for table
+          const minBound = initialTableScale * 0.85;
+          const maxBound = 3.8;
+          if (rawScale < minBound) {
+            const under = minBound - rawScale;
+            effectiveScale = minBound - under * 0.4;
+          } else if (rawScale > maxBound) {
+            const over = rawScale - maxBound;
+            effectiveScale = maxBound + over * 0.35;
+          }
+
+          effectiveScale = Math.max(initialTableScale * 0.6, Math.min(effectiveScale, 5.0));
+
+          const curCenterX = (t1.pageX + t2.pageX) / 2;
+          const curCenterY = (t1.pageY + t2.pageY) / 2;
+
+          // Calculate precise focal pan
+          const newPanX = curCenterX - SCREEN_WIDTH / 2 - pinchOrigin.current.x * effectiveScale;
+          const newPanY = curCenterY - SCREEN_HEIGHT / 2 - pinchOrigin.current.y * effectiveScale;
+
+          scale.setValue(effectiveScale);
+          pan.setValue({ x: newPanX, y: newPanY });
+          currentScale.current = effectiveScale;
+          currentPan.current = { x: newPanX, y: newPanY };
+        }
+        // ONE FINGER PAN / PULL-TO-DISMISS
+        else if (touches.length === 1) {
+          const t = touches[0];
+
+          // Seamless transition if 1 finger lifted during pinch
+          if (gestureMode.current !== 'pan') {
+            gestureMode.current = 'pan';
+            panStartTouch.current = { x: t.pageX, y: t.pageY };
+            panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+            pinchStartDist.current = null;
+            return;
+          }
+
+          const deltaX = t.pageX - panStartTouch.current.x;
+          const deltaY = t.pageY - panStartTouch.current.y;
+
+          // Native Gallery Pull-down-to-dismiss when table is at overview scale
+          if (currentScale.current <= initialTableScale * 1.15) {
+            if (deltaY > 0) {
+              const newX = panStartPan.current.x + deltaX * 0.35;
+              const newY = panStartPan.current.y + deltaY;
+              pan.setValue({
+                x: newX,
+                y: newY,
+              });
+              currentPan.current = { x: newX, y: newY };
+              const fade = Math.min(0.7, deltaY / 400);
+              backdropOpacity.setValue(Math.max(0.25, 1 - fade));
+              scale.setValue(Math.max(initialTableScale * 0.85, initialTableScale - deltaY / 1500));
+            } else {
+              // Slight upward resistance
+              const newX = panStartPan.current.x + deltaX * 0.35;
+              const newY = panStartPan.current.y + deltaY * 0.35;
+              pan.setValue({
+                x: newX,
+                y: newY,
+              });
+              currentPan.current = { x: newX, y: newY };
+            }
+          } else {
+            // Smooth 1:1 pan when zoomed in
+            const newX = panStartPan.current.x + deltaX;
+            const newY = panStartPan.current.y + deltaY;
+            pan.setValue({
+              x: newX,
+              y: newY,
+            });
+            currentPan.current = { x: newX, y: newY };
+          }
         }
       },
       onPanResponderRelease: (evt, gs) => {
-        initialDistanceRef.current = null;
-        if (Math.abs(gs.dx) < 6 && Math.abs(gs.dy) < 6) {
-          const touch = evt.nativeEvent;
-          const tblH = rawTableHeight || estimatedHeight;
-          const curW = A4_WIDTH * currentScale.current;
-          const curH = tblH * currentScale.current;
-          const tblTop = (SCREEN_HEIGHT - curH) / 2 + currentPan.current.y;
-          const tblBottom = (SCREEN_HEIGHT + curH) / 2 + currentPan.current.y;
-          const tblLeft = (SCREEN_WIDTH - curW) / 2 + currentPan.current.x;
-          const tblRight = (SCREEN_WIDTH + curW) / 2 + currentPan.current.x;
+        if (isDismissing.current) return;
+        const remainingTouches = evt.nativeEvent.touches;
+        if (remainingTouches && remainingTouches.length === 1) {
+          // Transition to 1-finger pan seamlessly
+          gestureMode.current = 'pan';
+          panStartTouch.current = { x: remainingTouches[0].pageX, y: remainingTouches[0].pageY };
+          panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+          pinchStartDist.current = null;
+          return;
+        }
 
-          if (
-            touch.pageY < tblTop ||
-            touch.pageY > tblBottom ||
-            touch.pageX < tblLeft ||
-            touch.pageX > tblRight
-          ) {
-            setModalVisible(false);
+        const wasMode = gestureMode.current;
+        gestureMode.current = 'none';
+        pinchStartDist.current = null;
+
+        const duration = Date.now() - touchStartTime.current;
+        const totalMove = Math.hypot(gs.dx, gs.dy);
+
+        // Tap Detection (comfortable tap with movement < 16px within 350ms)
+        if (totalMove < 16 && duration < 350) {
+          const now = Date.now();
+          const touch = evt.nativeEvent;
+
+          if (now - lastTapTime.current < 380) {
+            lastTapTime.current = 0;
+            handleDoubleTapAt(touch.pageX, touch.pageY);
+            return;
+          } else {
+            lastTapTime.current = now;
+            // NOTE: Clicking on blank space DOES NOT close the modal!
             return;
           }
         }
 
-        if (currentScale.current < 1.0) {
+        // Check for Gallery Pull-down-to-dismiss release near overview scale
+        if (wasMode === 'pan' && currentScale.current <= initialTableScale * 1.15) {
+          const dy = gs.dy;
+          const vy = gs.vy;
+          if (dy > 120 || (dy > 50 && vy > 0.7)) {
+            // Dismiss with smooth slide-down and fade-out
+            isDismissing.current = true;
+            Animated.parallel([
+              Animated.timing(pan, {
+                toValue: { x: currentPan.current.x, y: SCREEN_HEIGHT },
+                duration: 200,
+                useNativeDriver: true,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 0,
+                duration: 180,
+                useNativeDriver: true,
+              }),
+            ]).start(() => {
+              setModalVisible(false);
+              if (resetTimerRef.current) {
+                clearTimeout(resetTimerRef.current);
+              }
+              resetTimerRef.current = setTimeout(() => {
+                isDismissing.current = false;
+                resetTableZoom(false);
+              }, 350);
+            });
+            return;
+          } else {
+            // Snap back to overview scale and (0,0)
+            Animated.parallel([
+              Animated.spring(scale, {
+                toValue: initialTableScale,
+                useNativeDriver: true,
+                bounciness: 4,
+                speed: 16,
+              }),
+              Animated.spring(pan, {
+                toValue: { x: 0, y: 0 },
+                useNativeDriver: true,
+                bounciness: 4,
+                speed: 16,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 1,
+                duration: 150,
+                useNativeDriver: true,
+              }),
+            ]).start();
+            return;
+          }
+        }
+
+        // Normal Release for Pinch or Zoomed-in Pan:
+        backdropOpacity.setValue(1);
+        if (currentScale.current < initialTableScale) {
           resetTableZoom(true);
-        } else if (currentScale.current > 3.5) {
+        } else if (currentScale.current > 3.8) {
           Animated.spring(scale, {
-            toValue: 3.0,
+            toValue: 3.5,
             useNativeDriver: true,
             bounciness: 4,
             speed: 16,
           }).start();
+          clampTablePanToBounds(3.5);
         } else {
           clampTablePanToBounds(currentScale.current);
         }
       },
       onPanResponderTerminate: () => {
-        initialDistanceRef.current = null;
-        if (currentScale.current < 1.0) {
+        gestureMode.current = 'none';
+        pinchStartDist.current = null;
+        if (currentScale.current < initialTableScale) {
           resetTableZoom(true);
         }
+        backdropOpacity.setValue(1);
       },
     })
   ).current;
@@ -320,7 +549,7 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
                   isLight && { color: '#4338ca', fontWeight: '800' },
                 ]}
               >
-                {formatCellText(cell)}
+                {cleanTableHeaderText(cell)}
               </Text>
             </View>
           ))}
@@ -363,10 +592,7 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
       {/* Scaled Inline A4 Table Card (Fills Mobile Window Width like a Picture) */}
       <TouchableOpacity
         activeOpacity={0.9}
-        onPress={() => {
-          resetTableZoom(false);
-          setModalVisible(true);
-        }}
+        onPress={handleOpenModal}
         style={[
           styles.inlineTableCard,
           isLight ? styles.inlineTableCardLight : styles.inlineTableCardDark,
@@ -395,18 +621,17 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
           transparent={true}
           animationType="fade"
           presentationStyle="overFullScreen"
-          onRequestClose={() => setModalVisible(false)}
+          onRequestClose={handleCloseModal}
         >
-          <View style={styles.tableModalBackdrop} {...panResponder.panHandlers}>
-            {/* Absolute Fullscreen Tap-Outside-to-Close Touch Layer */}
-            <TouchableOpacity
-              activeOpacity={1}
-              style={StyleSheet.absoluteFillObject}
-              onPress={() => setModalVisible(false)}
-            />
-
+          <Animated.View
+            style={[
+              styles.tableModalBackdrop,
+              { opacity: backdropOpacity },
+            ]}
+            {...panResponder.panHandlers}
+          >
             {/* Focal-Zoomable Animated A4 Table Sheet Container */}
-            <View style={styles.modalContentContainer} pointerEvents="none">
+            <View style={styles.modalContentContainer} pointerEvents="box-none">
               <Animated.View
                 style={[
                   styles.a4PageSheet,
@@ -423,9 +648,49 @@ function InteractiveTableRenderer({ block, theme = 'dark' }) {
                 {renderA4TableBody()}
               </Animated.View>
             </View>
-          </View>
+
+            {/* Prominent Floating Close Button for Table Modal */}
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={handleCloseModal}
+              activeOpacity={0.8}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              accessibilityLabel="Close table viewer"
+            >
+              <X size={24} color="#ffffff" strokeWidth={2.5} />
+            </TouchableOpacity>
+          </Animated.View>
         </Modal>
       )}
+    </View>
+  );
+}
+
+/**
+ * Dedicated Code Block Component
+ * Displays preformatted blocks, schemas, and code with monospace font,
+ * subtle background, rounded corners, and horizontal scroll.
+ */
+function CodeBlockRenderer({ code, language, theme = 'dark' }) {
+  const isLight = theme === 'light';
+  return (
+    <View style={[styles.codeBlockContainer, isLight && styles.codeBlockContainerLight]}>
+      {language ? (
+        <View style={[styles.codeBlockHeader, isLight && styles.codeBlockHeaderLight]}>
+          <Text style={[styles.codeBlockHeaderText, isLight && styles.codeBlockHeaderTextLight]}>
+            {language.toUpperCase()}
+          </Text>
+        </View>
+      ) : null}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={true}
+        contentContainerStyle={styles.codeBlockScroll}
+      >
+        <Text style={[styles.codeBlockText, isLight && styles.codeBlockTextLight]}>
+          {code}
+        </Text>
+      </ScrollView>
     </View>
   );
 }
@@ -441,6 +706,17 @@ function FlowchartTreeRenderer({ text, theme = 'dark' }) {
 
   rawLines.forEach((line, idx) => {
     const trimmed = line.trim();
+
+    // 0. Horizontal divider line in flowchart
+    if (/^[\-\=\_\*]{2,}$/.test(trimmed)) {
+      elements.push(
+        <View
+          key={idx}
+          style={[styles.flowDividerLine, isLight && styles.flowDividerLineLight]}
+        />
+      );
+      return;
+    }
 
     // 1. Down Arrow Indicator
     if (trimmed === '↓' || trimmed === '|' || trimmed === 'v' || trimmed === '↓↓') {
@@ -478,7 +754,7 @@ function FlowchartTreeRenderer({ text, theme = 'dark' }) {
               ]}
             >
               <Text style={[styles.flowBranchNodeText, isLight && { color: '#b45309' }]}>
-                {bText.slice(1, -1)}
+                {bText.slice(1, -1).trim()}
               </Text>
             </View>
           ))}
@@ -487,18 +763,30 @@ function FlowchartTreeRenderer({ text, theme = 'dark' }) {
       return;
     }
 
-    // 4. Single Decision Node e.g. [1st episode of nephrotic syndrome]
+    // 4. Single Decision Node or bracketed symbol/arrow
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      const nodeText = trimmed.slice(1, -1);
+      const nodeText = trimmed.slice(1, -1).trim();
+      if (nodeText === '↓' || nodeText === 'v' || nodeText === '↓↓' || nodeText === '!' || nodeText === '↑') {
+        elements.push(
+          <View key={idx} style={styles.flowArrowContainer}>
+            <View style={[styles.flowLineVertical, isLight && { backgroundColor: '#6366f1' }]} />
+            <Text style={[styles.flowArrowText, isLight && { color: '#4338ca' }]}>
+              {nodeText === '!' ? '!' : '↓'}
+            </Text>
+          </View>
+        );
+        return;
+      }
+
       elements.push(
         <View
           key={idx}
           style={[
             styles.flowNodeCard,
-            isLight && { backgroundColor: '#ffffff', borderColor: '#6366f1' },
+            isLight && styles.flowNodeCardLight,
           ]}
         >
-          <Text style={[styles.flowNodeTitleText, isLight && { color: '#0f172a' }]}>
+          <Text style={[styles.flowNodeTitleText, isLight && styles.flowNodeTitleTextLight]}>
             {nodeText}
           </Text>
         </View>
@@ -520,6 +808,34 @@ function FlowchartTreeRenderer({ text, theme = 'dark' }) {
             {renderFormattedInlineText(trimmed, theme)}
           </Text>
         </View>
+      );
+      return;
+    }
+
+    // 5.5. Target or Clinical Highlight (e.g. 🎯 SAFE NEEDLE ENTRY)
+    if (trimmed.startsWith('🎯') || trimmed.startsWith('⚠️') || trimmed.startsWith('⭐')) {
+      elements.push(
+        <View
+          key={idx}
+          style={[
+            styles.flowTargetCard,
+            isLight && styles.flowTargetCardLight,
+          ]}
+        >
+          <Text style={[styles.flowTargetText, isLight && styles.flowTargetTextLight]}>
+            {renderFormattedInlineText(trimmed, theme)}
+          </Text>
+        </View>
+      );
+      return;
+    }
+
+    // 6. ASCII schema line with arrows/pipes (e.g. (V) Intercostal Vein | <-- COSTAL GROOVE)
+    if (trimmed.includes('|') || trimmed.includes('<--') || trimmed.includes('-->')) {
+      elements.push(
+        <Text key={idx} style={[styles.flowAsciiLineText, isLight && { color: '#334155' }]}>
+          {renderFormattedInlineText(trimmed, theme)}
+        </Text>
       );
       return;
     }
@@ -574,6 +890,29 @@ const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, textSty
               uri={block.url}
               caption={block.alt || 'Explanation Diagram'}
               theme={theme}
+            />
+          );
+        }
+
+        if (block.type === 'code') {
+          return (
+            <CodeBlockRenderer
+              key={index}
+              code={block.text}
+              language={block.language}
+              theme={theme}
+            />
+          );
+        }
+
+        if (block.type === 'divider') {
+          return (
+            <View
+              key={index}
+              style={[
+                styles.markdownDivider,
+                theme === 'light' && styles.markdownDividerLight,
+              ]}
             />
           );
         }
@@ -652,19 +991,29 @@ function parseMarkdownBlocks(text, explanationImage = null) {
   const imgUrl = (typeof explanationImage === 'string' && explanationImage.trim()) ? explanationImage.trim() : null;
 
   // Pre-process ((pic)) tags in text:
-  // If image URL is provided, replace ((pic)) with a distinct markdown image tag line
+  // If image URL is provided, replace only the FIRST ((pic)) with a distinct markdown image tag line,
+  // and strip any duplicate ((pic)) tags to prevent showing the same picture twice.
   if (imgUrl) {
     if (rawText.includes('((pic))')) {
-      rawText = rawText.replace(/\(\(pic\)\)/g, `\n\n![Explanation Diagram](${imgUrl})\n\n`);
+      let replaced = false;
+      rawText = rawText.replace(/\(\(pic\)\)/gi, () => {
+        if (!replaced) {
+          replaced = true;
+          return `\n\n![Explanation Diagram](${imgUrl})\n\n`;
+        }
+        return '';
+      });
     }
   } else {
     // If no image URL is provided, strip ((pic)) cleanly
-    rawText = rawText.replace(/\(\(pic\)\)/g, '');
+    rawText = rawText.replace(/\(\(pic\)\)/gi, '');
   }
 
   const lines = rawText.split('\n');
   const blocks = [];
+  const seenImageUrls = new Set();
 
+  let currentCodeBlock = null;
   let currentTable = null;
   let currentList = null;
   let currentFlowchart = [];
@@ -673,7 +1022,49 @@ function parseMarkdownBlocks(text, explanationImage = null) {
   lines.forEach((line) => {
     const trimmed = line.trim();
 
-    // Check for Markdown Image syntax: ![alt](url)
+    // 1. Check for Code Block fences or lone backtick lines
+    if (/^`{1,}/.test(trimmed)) {
+      if (currentCodeBlock) {
+        // End of code block
+        blocks.push({
+          type: 'code',
+          language: currentCodeBlock.language,
+          text: currentCodeBlock.lines.join('\n'),
+        });
+        currentCodeBlock = null;
+        return;
+      } else if (trimmed.startsWith('```')) {
+        // Start of standard code fence
+        if (currentTable) { blocks.push(currentTable); currentTable = null; }
+        if (currentList) { blocks.push(currentList); currentList = null; }
+        if (currentFlowchart.length > 0) {
+          blocks.push({ type: 'flowchart', text: currentFlowchart.join('\n') });
+          currentFlowchart = [];
+        }
+        const lang = trimmed.replace(/^`+/, '').trim();
+        currentCodeBlock = { language: lang, lines: [] };
+        return;
+      } else if (/^`+$/.test(trimmed)) {
+        // Stray single or double backtick on its own line (e.g. `) -> ignore, never render as badge!
+        return;
+      }
+    }
+
+    if (currentCodeBlock) {
+      currentCodeBlock.lines.push(line);
+      return;
+    }
+
+    // 2. Horizontal Divider check: --, ---, ===, ***, ___ (2 or more dashes/equals)
+    const isDivider = /^(\-{2,}|\*{3,}|_{3,}|={2,})$/.test(trimmed);
+    if (isDivider && currentFlowchart.length === 0) {
+      if (currentTable) { blocks.push(currentTable); currentTable = null; }
+      if (currentList) { blocks.push(currentList); currentList = null; }
+      blocks.push({ type: 'divider' });
+      return;
+    }
+
+    // 3. Check for Markdown Image syntax: ![alt](url)
     const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
     if (imgMatch) {
       if (currentTable) {
@@ -692,15 +1083,20 @@ function parseMarkdownBlocks(text, explanationImage = null) {
         currentFlowchart = [];
       }
 
-      blocks.push({
-        type: 'image',
-        alt: imgMatch[1] || 'Explanation Diagram',
-        url: imgMatch[2].trim(),
-      });
-      hasRenderedImage = true;
+      const imgTarget = imgMatch[2].trim();
+      if (!seenImageUrls.has(imgTarget)) {
+        seenImageUrls.add(imgTarget);
+        blocks.push({
+          type: 'image',
+          alt: imgMatch[1] || 'Explanation Diagram',
+          url: imgTarget,
+        });
+        hasRenderedImage = true;
+      }
       return;
     }
 
+    const inFlow = currentFlowchart.length > 0;
     const isFlowLine =
       trimmed === '↓' ||
       trimmed === '|' ||
@@ -710,7 +1106,16 @@ function parseMarkdownBlocks(text, explanationImage = null) {
       trimmed.includes('↘') ||
       trimmed.includes('├──') ||
       trimmed.includes('└──') ||
-      /^\[[^\]]+\]/.test(trimmed);
+      trimmed.includes('<--') ||
+      trimmed.includes('-->') ||
+      /^\[[^\]]+\]$/.test(trimmed) ||
+      (inFlow && (
+        /^[\-\=\_\*]{2,}$/.test(trimmed) ||
+        trimmed.includes('|') ||
+        (trimmed.startsWith('(') && trimmed.includes(')')) ||
+        trimmed.startsWith('🎯') ||
+        trimmed.startsWith('⚠️')
+      ));
 
     if (isFlowLine) {
       if (currentTable) {
@@ -733,6 +1138,13 @@ function parseMarkdownBlocks(text, explanationImage = null) {
         text: currentFlowchart.join('\n'),
       });
       currentFlowchart = [];
+    }
+
+    if (isDivider) {
+      if (currentTable) { blocks.push(currentTable); currentTable = null; }
+      if (currentList) { blocks.push(currentList); currentList = null; }
+      blocks.push({ type: 'divider' });
+      return;
     }
 
     const pipeCount = (trimmed.match(/\|/g) || []).length;
@@ -789,9 +1201,9 @@ function parseMarkdownBlocks(text, explanationImage = null) {
       return;
     }
 
-    const isBulletLine = /^[•\-\*\u2022]\s*/.test(trimmed);
+    const isBulletLine = /^(?:[•\u2022]\s*|[\-\*]\s+)/.test(trimmed);
     if (isBulletLine) {
-      const itemText = trimmed.replace(/^[•\-\*\u2022]\s*/, '');
+      const itemText = trimmed.replace(/^(?:[•\u2022]\s*|[\-\*]\s+)/, '');
       if (!currentList || currentList.listType === 'numbered') {
         if (currentList) blocks.push(currentList);
         currentList = {
@@ -826,6 +1238,14 @@ function parseMarkdownBlocks(text, explanationImage = null) {
     });
   });
 
+  if (currentCodeBlock) {
+    blocks.push({
+      type: 'code',
+      language: currentCodeBlock.language,
+      text: currentCodeBlock.lines.join('\n'),
+    });
+    currentCodeBlock = null;
+  }
   if (currentFlowchart.length > 0) {
     blocks.push({
       type: 'flowchart',
@@ -837,7 +1257,8 @@ function parseMarkdownBlocks(text, explanationImage = null) {
 
   // If explanationImage was provided but neither ((pic)) nor ![...] was in the raw text,
   // append the image block cleanly at the bottom of the explanation!
-  if (imgUrl && !hasRenderedImage) {
+  if (imgUrl && !seenImageUrls.has(imgUrl)) {
+    seenImageUrls.add(imgUrl);
     blocks.push({
       type: 'image',
       alt: 'Explanation Diagram',
@@ -881,17 +1302,40 @@ function cleanLatexFormulas(rawStr) {
 function renderFormattedInlineText(text, theme = 'dark') {
   if (!text) return '';
   const sanitized = cleanLatexFormulas(text);
-  const cleanText = String(sanitized).replace(/<br\s*\/?>/gi, '\n');
+  let cleanText = String(sanitized)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(b|strong)>/gi, '**')
+    .replace(/<\/?u>/gi, '');
+
+  // Strip triple backticks or fence leaks to prevent orphan badge glitches
+  cleanText = cleanText.replace(/`{3,}/g, '');
+
+  // Strip isolated single backticks (e.g. ` alone with space or boundaries)
+  cleanText = cleanText.replace(/(^|\s)`+(\s|$)/g, ' ');
+
+  // Collapse consecutive bold boundary tokens like **** **** or ******* into a space
+  cleanText = cleanText.replace(/\*{2,}\s*\*{2,}/g, ' ');
+
+  // Normalize bold with inner leading/trailing spaces e.g. ** text** or **text ** -> **text**
+  cleanText = cleanText
+    .replace(/\*\*\s+([^\*]+?)\*\*/g, '**$1**')
+    .replace(/\*\*([^\*]+?)\s+\*\*/g, '**$1**');
+
+  // Normalize asymmetric/typo asterisks like *Word** or **Word* into standard **Word**
+  cleanText = cleanText
+    .replace(/(^|[^\*])\*([^\*\s][^\*]*?)\*\*([^\*]|$)/g, '$1**$2**$3')
+    .replace(/(^|[^\*])\*\*([^\*\s][^\*]*?)\*([^\*]|$)/g, '$1**$2**$3');
+
   const isLight = theme === 'light';
 
-  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const regex = /(\*{2,}[^*]+\*{2,}|`[^`]+`)/g;
   const parts = cleanText.split(regex);
 
   return parts.map((part, idx) => {
     if (!part) return null;
 
-    if (part.startsWith('**') && part.endsWith('**')) {
-      const boldContent = part.slice(2, -2);
+    if (/^\*{2,}/.test(part) && /\*{2,}$/.test(part)) {
+      const boldContent = part.replace(/^\*{2,}|\*{2,}$/g, '');
       return (
         <Text
           key={idx}
@@ -905,7 +1349,9 @@ function renderFormattedInlineText(text, theme = 'dark') {
       );
     }
 
-    if (part.startsWith('`') && part.endsWith('`')) {
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      const codeContent = part.slice(1, -1).trim();
+      if (!codeContent) return null;
       return (
         <Text
           key={idx}
@@ -914,19 +1360,19 @@ function renderFormattedInlineText(text, theme = 'dark') {
             color: isLight ? '#0284c7' : '#38bdf8',
             fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
             fontSize: 12,
-            paddingHorizontal: 4,
-            paddingVertical: 1,
+            paddingHorizontal: 5,
+            paddingVertical: 1.5,
             borderRadius: 4,
             borderWidth: 1,
             borderColor: isLight ? '#cbd5e1' : '#334155',
           }}
         >
-          {part.slice(1, -1)}
+          {codeContent}
         </Text>
       );
     }
 
-    return cleanLatexFormulas(part);
+    return cleanLatexFormulas(part.replace(/\*{2,}/g, '').replace(/`/g, ''));
   });
 }
 
@@ -1003,11 +1449,46 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#818cf8',
   },
+  flowNodeCardLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#6366f1',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
   flowNodeTitleText: {
     fontSize: 13,
     fontWeight: '700',
     color: '#f8fafc',
     textAlign: 'center',
+  },
+  flowNodeTitleTextLight: {
+    color: '#312e81',
+    fontWeight: '800',
+    fontSize: 12.5,
+    letterSpacing: 0.4,
+  },
+  flowTargetCard: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginVertical: 4,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  flowTargetCardLight: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+  },
+  flowTargetText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#34d399',
+  },
+  flowTargetTextLight: {
+    color: '#065f46',
   },
   flowArrowContainer: {
     alignItems: 'center',
@@ -1071,6 +1552,78 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
     marginVertical: 2,
+  },
+  flowDividerLine: {
+    height: 1,
+    backgroundColor: '#334155',
+    marginVertical: 6,
+    width: '100%',
+  },
+  flowDividerLineLight: {
+    backgroundColor: '#cbd5e1',
+  },
+  flowAsciiLineText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11.5,
+    lineHeight: 18,
+    color: '#94a3b8',
+    marginVertical: 1,
+  },
+
+  markdownDivider: {
+    height: 1,
+    backgroundColor: '#334155',
+    marginVertical: 10,
+    width: '100%',
+  },
+  markdownDividerLight: {
+    backgroundColor: '#e2e8f0',
+  },
+
+  codeBlockContainer: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginVertical: 8,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  codeBlockContainerLight: {
+    backgroundColor: '#f8fafc',
+    borderColor: '#cbd5e1',
+  },
+  codeBlockHeader: {
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+  },
+  codeBlockHeaderLight: {
+    backgroundColor: '#f1f5f9',
+    borderBottomColor: '#cbd5e1',
+  },
+  codeBlockHeaderText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#818cf8',
+    letterSpacing: 0.5,
+  },
+  codeBlockHeaderTextLight: {
+    color: '#6366f1',
+  },
+  codeBlockScroll: {
+    padding: 10,
+  },
+  codeBlockText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#38bdf8',
+  },
+  codeBlockTextLight: {
+    color: '#0f172a',
   },
 
   tableWrapper: {
@@ -1265,6 +1818,44 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontWeight: '800',
     color: '#818cf8',
+  },
+  modalCloseBtn: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 36,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15, 23, 42, 0.90)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+  },
+  modalHintPill: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 42 : 26,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    zIndex: 998,
+    elevation: 6,
+  },
+  modalHintText: {
+    color: '#f8fafc',
+    fontSize: 11.5,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });
 

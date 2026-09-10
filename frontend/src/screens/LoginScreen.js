@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,16 +6,16 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
+  ImageBackground,
   ActivityIndicator,
   Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
-  Animated,
   StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mail, Lock, User, ArrowRight, Eye, EyeOff, Sparkles } from 'lucide-react-native';
 import { loginApi, registerApi } from '../services/api';
 
@@ -28,6 +28,10 @@ const BG_IMAGES = [
 ];
 
 export default function LoginScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const topPadding = Math.max(insets?.top || 0, Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44);
+  const bottomPadding = Math.max(insets?.bottom || 0, 20);
+
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -37,25 +41,11 @@ export default function LoginScreen({ navigation }) {
 
   // Live Background Slideshow State
   const [bgIndex, setBgIndex] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
-      // Fade out slightly
-      Animated.timing(fadeAnim, {
-        toValue: 0.35,
-        duration: 900,
-        useNativeDriver: true,
-      }).start(() => {
-        setBgIndex((prev) => (prev + 1) % BG_IMAGES.length);
-        // Fade smoothly back in
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }).start();
-      });
-    }, 5500);
+      setBgIndex((prev) => (prev + 1) % BG_IMAGES.length);
+    }, 6000);
 
     return () => clearInterval(timer);
   }, []);
@@ -104,29 +94,34 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+    <ImageBackground
+      source={BG_IMAGES[bgIndex]}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-      {/* ── True Edge-To-Edge Fullscreen Background & Overlay ── */}
-      <View style={styles.bgContainer}>
-        <Animated.Image
-          source={BG_IMAGES[bgIndex]}
-          style={[styles.bgImage, { opacity: fadeAnim }]}
-          resizeMode="cover"
-        />
-        <View style={styles.bgOverlay} />
-      </View>
-
-      <SafeAreaView style={{ flex: 1 }}>
+      {/* ── Frosted Soft Light Overlay Encapsulating All Content ── */}
+      <View style={styles.bgOverlay}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled={Platform.OS === 'ios'}
+          style={styles.keyboardAvoid}
         >
           <ScrollView
-            contentContainerStyle={styles.scrollContent}
+            style={styles.scrollView}
+            contentContainerStyle={[
+              styles.scrollContent,
+              {
+                paddingTop: topPadding + 8,
+                paddingBottom: bottomPadding + 16,
+              },
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            {/* Centering Wrapper: Native Android Safe */}
+            <View style={styles.centerWrapper}>
             {/* ── Top: Logo & Brand ── */}
             <View style={styles.heroSection}>
               <Image
@@ -150,7 +145,7 @@ export default function LoginScreen({ navigation }) {
               </View>
             </View>
 
-            {/* ── Bottom: Glassmorphism Auth Card ── */}
+            {/* ── Bottom: Premium Frosted White Auth Card ── */}
             <View style={styles.authCard}>
               {/* Toggle Tabs */}
               <View style={styles.tabRow}>
@@ -175,11 +170,11 @@ export default function LoginScreen({ navigation }) {
                 <View style={styles.fieldBlock}>
                   <Text style={styles.fieldLabel}>Full Name</Text>
                   <View style={styles.fieldRow}>
-                    <User size={16} color="#818cf8" />
+                    <User size={16} color="#2563eb" />
                     <TextInput
                       style={styles.fieldInput}
                       placeholder="Enter your full name"
-                      placeholderTextColor="#64748b"
+                      placeholderTextColor="#94a3b8"
                       value={name}
                       onChangeText={setName}
                     />
@@ -190,11 +185,11 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>Email Address</Text>
                 <View style={styles.fieldRow}>
-                  <Mail size={16} color="#818cf8" />
+                  <Mail size={16} color="#2563eb" />
                   <TextInput
                     style={styles.fieldInput}
                     placeholder="name@example.com"
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor="#94a3b8"
                     value={email}
                     onChangeText={setEmail}
                     keyboardType="email-address"
@@ -206,20 +201,20 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>Password</Text>
                 <View style={styles.fieldRow}>
-                  <Lock size={16} color="#818cf8" />
+                  <Lock size={16} color="#2563eb" />
                   <TextInput
                     style={styles.fieldInput}
                     placeholder="Enter your password"
-                    placeholderTextColor="#64748b"
+                    placeholderTextColor="#94a3b8"
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
                   />
                   <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
                     {showPassword ? (
-                      <EyeOff size={16} color="#94a3b8" />
+                      <EyeOff size={16} color="#64748b" />
                     ) : (
-                      <Eye size={16} color="#94a3b8" />
+                      <Eye size={16} color="#64748b" />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -239,7 +234,9 @@ export default function LoginScreen({ navigation }) {
                     <Text style={styles.primaryBtnText}>
                       {isRegister ? 'Create Account' : 'Sign In'}
                     </Text>
-                    <ArrowRight size={17} color="#fff" style={{ marginLeft: 5 }} />
+                    <View style={{ marginLeft: 6 }}>
+                      <ArrowRight size={17} color="#fff" />
+                    </View>
                   </View>
                 )}
               </TouchableOpacity>
@@ -247,58 +244,71 @@ export default function LoginScreen({ navigation }) {
 
             {/* Footer */}
             <View style={styles.footerRow}>
-              <Sparkles size={13} color="#a855f7" style={{ marginRight: 4 }} />
+              <View style={{ marginRight: 5 }}>
+                <Sparkles size={13} color="#2563eb" />
+              </View>
               <Text style={styles.footerText}>
                 Powered by Gemini 3.6 Flash AI Engine
               </Text>
             </View>
+          </View>
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
-    </View>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#f8fafc',
   },
-  bgContainer: {
-    ...StyleSheet.absoluteFillObject,
+  keyboardAvoid: {
+    flex: 1,
     width: '100%',
-    height: '100%',
   },
-  bgImage: {
+  scrollView: {
+    flex: 1,
     width: '100%',
-    height: '100%',
-  },
-  bgOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.82)',
   },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  centerWrapper: {
+    width: '100%',
+    maxWidth: 440,
+    alignItems: 'center',
     paddingVertical: 16,
+  },
+  bgOverlay: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.42)',
   },
 
   /* ── Hero Section ── */
   heroSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+    width: '100%',
+    maxWidth: 440,
   },
   logoImage: {
-    width: width * 0.52,
-    height: width * 0.52,
-    marginBottom: 4,
+    width: Math.min(width * 0.48, 190),
+    height: Math.min(width * 0.48, 190),
+    marginBottom: 2,
   },
   tagline: {
-    fontSize: 12.5,
-    color: '#cbd5e1',
+    fontSize: 13,
+    color: '#334155',
     marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   indicatorRow: {
     flexDirection: 'row',
@@ -310,50 +320,57 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(37, 99, 235, 0.22)',
   },
   indicatorDotActive: {
-    width: 18,
-    backgroundColor: '#a855f7',
+    width: 20,
+    backgroundColor: '#2563eb',
   },
 
-  /* ── Glassmorphism Auth Card ── */
+  /* ── Premium Frosted White Auth Card ── */
   authCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.88)',
-    borderRadius: 22,
-    padding: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 24,
+    padding: 22,
     borderWidth: 1.5,
-    borderColor: 'rgba(168, 85, 247, 0.35)',
-    shadowColor: '#a855f7',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    borderColor: 'rgba(37, 99, 235, 0.2)',
+    shadowColor: '#1d4ed8',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 8,
+    width: '100%',
+    maxWidth: 440,
   },
 
   /* Tabs */
   tabRow: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    borderRadius: 12,
-    padding: 3,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 14,
+    padding: 4,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#e2e8f0',
   },
   tab: {
     flex: 1,
-    paddingVertical: 9,
+    paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 9,
+    borderRadius: 10,
   },
   tabActive: {
-    backgroundColor: '#6366f1',
+    backgroundColor: '#2563eb',
+    shadowColor: '#2563eb',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
   tabText: {
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '600',
-    color: '#94a3b8',
+    color: '#64748b',
   },
   tabTextActive: {
     color: '#ffffff',
@@ -365,41 +382,41 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   fieldLabel: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '600',
-    color: '#cbd5e1',
-    marginBottom: 4,
+    color: '#334155',
+    marginBottom: 5,
     marginLeft: 2,
   },
   fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#cbd5e1',
     gap: 8,
   },
   fieldInput: {
     flex: 1,
     fontSize: 13.5,
-    color: '#f8fafc',
+    color: '#0f172a',
     padding: 0,
     fontWeight: '500',
   },
 
   /* Primary Button */
   primaryBtn: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#2563eb',
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: 'center',
     marginTop: 6,
-    shadowColor: '#a855f7',
+    shadowColor: '#2563eb',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
   },
@@ -408,9 +425,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryBtnText: {
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '800',
     color: '#ffffff',
+    letterSpacing: 0.3,
   },
 
   /* Footer */
@@ -421,9 +439,9 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   footerText: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: 11.5,
+    color: '#475569',
     textAlign: 'center',
-    fontWeight: '500',
+    fontWeight: '600',
   },
 });

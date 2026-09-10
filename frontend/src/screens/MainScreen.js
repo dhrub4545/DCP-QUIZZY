@@ -44,50 +44,50 @@ export default function MainScreen({ navigation, route }) {
 
   return (
     <View style={[styles.container, isGlass ? styles.containerGlass : styles.containerDark]}>
-      <View style={[styles.tabContent, activeTab === 'Home' ? styles.visible : styles.hidden]}>
+      {activeTab === 'Home' && (
         <HomeScreen
           navigation={navigation}
           route={route}
           onTabPress={handleTabPress}
-          isActiveTab={activeTab === 'Home'}
+          isActiveTab={true}
         />
-      </View>
+      )}
 
-      <View style={[styles.tabContent, activeTab === 'Quizzes' ? styles.visible : styles.hidden]}>
+      {activeTab === 'Quizzes' && (
         <QuizzesScreen
           navigation={navigation}
           route={route}
           onTabPress={handleTabPress}
-          isActiveTab={activeTab === 'Quizzes'}
+          isActiveTab={true}
         />
-      </View>
+      )}
 
-      <View style={[styles.tabContent, activeTab === 'Study' ? styles.visible : styles.hidden]}>
+      {activeTab === 'Study' && (
         <StudyScreen
           navigation={navigation}
           route={route}
           onTabPress={handleTabPress}
-          isActiveTab={activeTab === 'Study'}
+          isActiveTab={true}
         />
-      </View>
+      )}
 
-      <View style={[styles.tabContent, activeTab === 'History' ? styles.visible : styles.hidden]}>
+      {activeTab === 'History' && (
         <HistoryScreen
           navigation={navigation}
           route={route}
           onTabPress={handleTabPress}
-          isActiveTab={activeTab === 'History'}
+          isActiveTab={true}
         />
-      </View>
+      )}
 
-      <View style={[styles.tabContent, activeTab === 'Profile' ? styles.visible : styles.hidden]}>
+      {activeTab === 'Profile' && (
         <ProfileScreen
           navigation={navigation}
           route={route}
           onTabPress={handleTabPress}
-          isActiveTab={activeTab === 'Profile'}
+          isActiveTab={true}
         />
-      </View>
+      )}
     </View>
   );
 }
@@ -101,19 +101,5 @@ const styles = StyleSheet.create({
   },
   containerGlass: {
     backgroundColor: '#f2f2f7',
-  },
-  tabContent: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  visible: {
-    display: 'flex',
-    opacity: 1,
-    zIndex: 1,
-  },
-  hidden: {
-    display: 'none',
-    opacity: 0,
-    zIndex: -1,
-    pointerEvents: 'none',
   },
 });

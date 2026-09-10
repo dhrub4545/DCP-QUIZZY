@@ -1,7 +1,9 @@
 import React from 'react';
+import { View, Text, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 
 import LoginScreen from './src/screens/LoginScreen';
@@ -10,6 +12,38 @@ import TestScreen from './src/screens/TestScreen';
 import ResultScreen from './src/screens/ResultScreen';
 
 const Stack = createNativeStackNavigator();
+
+class GlobalErrorBoundary extends React.Component {
+  state = { hasError: false, error: null, errorInfo: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('GLOBAL_ERROR_BOUNDARY_CAUGHT:', error, errorInfo);
+    this.setState({ error, errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaProvider>
+          <View style={{ flex: 1, backgroundColor: '#450a0a', padding: 24, justifyContent: 'center' }}>
+            <Text style={{ color: '#f87171', fontSize: 20, fontWeight: 'bold' }}>⚠️ Render Error Caught</Text>
+            <Text style={{ color: '#ffffff', fontSize: 14, marginVertical: 12 }}>
+              {String(this.state.error?.message || this.state.error)}
+            </Text>
+            <Text style={{ color: '#fca5a5', fontSize: 11 }}>
+              {String(this.state.errorInfo?.componentStack || '')}
+            </Text>
+          </View>
+        </SafeAreaProvider>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const customDarkTheme = {
   ...DarkTheme,
@@ -47,6 +81,7 @@ function AppNavigator() {
           headerShown: false,
           contentStyle: { backgroundColor: isGlass ? '#f2f2f7' : '#0f172a' },
           animation: 'slide_from_right',
+          freezeOnBlur: false,
         }}
       >
         <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'fade' }} />
@@ -65,8 +100,12 @@ function AppNavigator() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AppNavigator />
-    </ThemeProvider>
+    <GlobalErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AppNavigator />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GlobalErrorBoundary>
   );
 }

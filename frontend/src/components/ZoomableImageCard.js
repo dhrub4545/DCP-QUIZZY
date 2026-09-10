@@ -10,18 +10,24 @@ import {
   Modal,
   Animated,
   PanResponder,
+  Platform,
 } from 'react-native';
-import { AlertCircle } from 'lucide-react-native';
+import { AlertCircle, X } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 /**
  * ZoomableImageCard
- * Gallery-grade 60fps/120fps photo viewer with focal-point 2-finger pinch zoom,
- * focal-point double-tap zoom, and blank space tap-to-close dismissal. Zero cross sign.
+ * High-performance full-screen image viewer with:
+ * - 100% reliable 2-finger pinch zoom (always activates, baseline-anchored, zero jitter)
+ * - Double-tap focal point zoom (1.0x <-> 2.5x)
+ * - Translucent/transparent dark overlay (not pitch black, study text visible behind)
+ * - Prominent dedicated Close Button (clicking blank space does NOT close)
+ * - Swipe-down to dismiss at 1.0x
  */
 export default function ZoomableImageCard({
   uri,
+  caption,
   theme = 'dark',
   style,
   imageStyle,
@@ -32,24 +38,43 @@ export default function ZoomableImageCard({
   const [error, setError] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Animated transforms for 60/120fps GPU performance
+  // Animated values
   const scale = useRef(new Animated.Value(1)).current;
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const backdropOpacity = useRef(new Animated.Value(1)).current;
   const currentScale = useRef(1);
   const currentPan = useRef({ x: 0, y: 0 });
 
-  const initialDistance = useRef(null);
-  const initialScale = useRef(1);
-  const initialFocal = useRef({ x: 0, y: 0 });
-  const initialPan = useRef({ x: 0, y: 0 });
-  const lastTapRef = useRef(0);
+  // Gesture tracking refs
+  const gestureMode = useRef('none'); // 'none' | 'pinch' | 'pan'
+  const pinchStartDist = useRef(null);
+  const pinchStartScale = useRef(1);
+  const pinchOrigin = useRef({ x: 0, y: 0 });
+  const panStartTouch = useRef({ x: 0, y: 0 });
+  const panStartPan = useRef({ x: 0, y: 0 });
+  const touchStartTime = useRef(0);
+  const lastTapTime = useRef(0);
+  const resetTimerRef = useRef(null);
+  const isDismissing = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const scaleSub = scale.addListener((v) => {
-      currentScale.current = v.value;
+      if (!isDismissing.current) {
+        currentScale.current = v.value;
+      }
     });
     const panSub = pan.addListener((v) => {
-      currentPan.current = v;
+      if (!isDismissing.current) {
+        currentPan.current = v;
+      }
     });
     return () => {
       scale.removeListener(scaleSub);
@@ -70,7 +95,8 @@ export default function ZoomableImageCard({
       (width, height) => {
         if (isMounted && width && height && height > 0) {
           const ratio = width / height;
-          const clampedRatio = Math.max(0.5, Math.min(ratio, 2.8));
+          // Support very tall (portrait) and wide diagrams alike without distortion
+          const clampedRatio = Math.max(0.15, Math.min(ratio, 4.0));
           setAspectRatio(clampedRatio);
           setLoading(false);
         }
@@ -88,10 +114,32 @@ export default function ZoomableImageCard({
     };
   }, [uri]);
 
-  const imgWidth = SCREEN_WIDTH * 0.94;
-  const imgHeight = imgWidth / (aspectRatio || 16 / 9);
+  // Fit within screen bounds with zero overflow (both width and height are strictly bounded)
+  const maxModalW = SCREEN_WIDTH * 0.92;
+  const maxModalH = SCREEN_HEIGHT * 0.82;
+  const r = aspectRatio || 16 / 9;
+
+  let imgWidth = maxModalW;
+  let imgHeight = imgWidth / r;
+
+  if (imgHeight > maxModalH) {
+    imgHeight = maxModalH;
+    imgWidth = imgHeight * r;
+  }
 
   const resetZoom = (animated = true) => {
+    currentScale.current = 1.0;
+    currentPan.current = { x: 0, y: 0 };
+    gestureMode.current = 'none';
+    pinchStartDist.current = null;
+    pinchStartScale.current = 1.0;
+    pinchOrigin.current = { x: 0, y: 0 };
+    panStartTouch.current = { x: 0, y: 0 };
+    panStartPan.current = { x: 0, y: 0 };
+
+    pan.stopAnimation();
+    scale.stopAnimation();
+
     if (animated) {
       Animated.parallel([
         Animated.spring(scale, {
@@ -106,10 +154,16 @@ export default function ZoomableImageCard({
           bounciness: 4,
           speed: 16,
         }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
       ]).start();
     } else {
       scale.setValue(1);
       pan.setValue({ x: 0, y: 0 });
+      backdropOpacity.setValue(1);
     }
   };
 
@@ -120,7 +174,8 @@ export default function ZoomableImageCard({
     const targetX = Math.max(-maxPanX, Math.min(maxPanX, currentPan.current.x));
     const targetY = Math.max(-maxPanY, Math.min(maxPanY, currentPan.current.y));
 
-    if (targetX !== currentPan.current.x || targetY !== currentPan.current.y) {
+    if (Math.abs(targetX - currentPan.current.x) > 1 || Math.abs(targetY - currentPan.current.y) > 1) {
+      currentPan.current = { x: targetX, y: targetY };
       Animated.spring(pan, {
         toValue: { x: targetX, y: targetY },
         useNativeDriver: true,
@@ -130,12 +185,41 @@ export default function ZoomableImageCard({
     }
   };
 
+  const handleOpenModal = () => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    isDismissing.current = false;
+    resetZoom(false);
+    backdropOpacity.setValue(1);
+    setModalVisible(true);
+  };
+
+  const handleCloseModal = () => {
+    if (isDismissing.current) return;
+    isDismissing.current = true;
+    Animated.timing(backdropOpacity, {
+      toValue: 0,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(() => {
+      setModalVisible(false);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => {
+        isDismissing.current = false;
+        resetZoom(false);
+      }, 350);
+    });
+  };
+
   const handleDoubleTapAt = (touchX, touchY) => {
-    if (currentScale.current > 1.1) {
+    if (currentScale.current > 1.15) {
       resetZoom(true);
     } else {
-      const targetScale = 2.4;
-      // Focal zoom: shift pan directly toward touched point
+      const targetScale = 2.5;
       const targetPanX = (SCREEN_WIDTH / 2 - touchX) * (targetScale - 1);
       const targetPanY = (SCREEN_HEIGHT / 2 - touchY) * (targetScale - 1);
 
@@ -143,6 +227,9 @@ export default function ZoomableImageCard({
       const maxPanY = Math.max(0, (imgHeight * targetScale - SCREEN_HEIGHT) / 2);
       const boundedPanX = Math.max(-maxPanX, Math.min(maxPanX, targetPanX));
       const boundedPanY = Math.max(-maxPanY, Math.min(maxPanY, targetPanY));
+
+      currentScale.current = targetScale;
+      currentPan.current = { x: boundedPanX, y: boundedPanY };
 
       Animated.parallel([
         Animated.spring(scale, {
@@ -157,128 +244,250 @@ export default function ZoomableImageCard({
           bounciness: 4,
           speed: 16,
         }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
       ]).start();
     }
+  };
+
+  const startPinch = (t1, t2) => {
+    const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+    if (dist < 5) return;
+    gestureMode.current = 'pinch';
+    pinchStartDist.current = dist;
+    pinchStartScale.current = currentScale.current;
+    const centerX = (t1.pageX + t2.pageX) / 2;
+    const centerY = (t1.pageY + t2.pageY) / 2;
+    pinchOrigin.current = {
+      x: (centerX - SCREEN_WIDTH / 2 - currentPan.current.x) / (currentScale.current || 1),
+      y: (centerY - SCREEN_HEIGHT / 2 - currentPan.current.y) / (currentScale.current || 1),
+    };
   };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (evt, gs) => {
-        return (
-          evt.nativeEvent.touches.length >= 2 ||
-          currentScale.current > 1.05 ||
-          Math.abs(gs.dx) > 3 ||
-          Math.abs(gs.dy) > 3
-        );
-      },
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: (evt) => {
-        if (evt.nativeEvent.touches.length === 2) {
-          const [t1, t2] = evt.nativeEvent.touches;
-          initialDistance.current = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-          initialScale.current = currentScale.current;
-          initialFocal.current = {
-            x: (t1.pageX + t2.pageX) / 2,
-            y: (t1.pageY + t2.pageY) / 2,
-          };
-          initialPan.current = { ...currentPan.current };
-        } else if (evt.nativeEvent.touches.length === 1) {
-          const now = Date.now();
-          const touch = evt.nativeEvent.touches[0];
+        if (isDismissing.current) return;
+        const touches = evt.nativeEvent.touches;
+        touchStartTime.current = Date.now();
 
-          if (now - lastTapRef.current < 300) {
-            handleDoubleTapAt(touch.pageX, touch.pageY);
-            lastTapRef.current = 0;
-          } else {
-            lastTapRef.current = now;
-            initialPan.current = { ...currentPan.current };
-          }
+        if (touches.length >= 2) {
+          startPinch(touches[0], touches[1]);
+        } else if (touches.length === 1) {
+          gestureMode.current = 'pan';
+          panStartTouch.current = { x: touches[0].pageX, y: touches[0].pageY };
+          panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+          pinchStartDist.current = null;
         }
       },
 
       onPanResponderMove: (evt, gs) => {
-        if (evt.nativeEvent.touches.length >= 2) {
-          const [t1, t2] = evt.nativeEvent.touches;
-          const dist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
-          const currentFocal = {
-            x: (t1.pageX + t2.pageX) / 2,
-            y: (t1.pageY + t2.pageY) / 2,
-          };
+        if (isDismissing.current) return;
+        const touches = evt.nativeEvent.touches;
 
-          if (initialDistance.current && initialDistance.current > 0) {
-            const factor = dist / initialDistance.current;
-            const newScale = Math.min(Math.max(initialScale.current * factor, 0.75), 4.0);
+        // TWO FINGERS PINCH TO ZOOM & PAN
+        if (touches.length >= 2) {
+          const t1 = touches[0];
+          const t2 = touches[1];
+          const curDist = Math.hypot(t1.pageX - t2.pageX, t1.pageY - t2.pageY);
+          if (curDist < 5) return;
 
-            // Real-time focal translation math (keeps touched point locked under fingers)
-            const focalShiftX =
-              (currentFocal.x - SCREEN_WIDTH / 2) * (1 - newScale / initialScale.current);
-            const focalShiftY =
-              (currentFocal.y - SCREEN_HEIGHT / 2) * (1 - newScale / initialScale.current);
-            const deltaFocalX = currentFocal.x - initialFocal.current.x;
-            const deltaFocalY = currentFocal.y - initialFocal.current.y;
-
-            const nextPanX = initialPan.current.x + deltaFocalX + focalShiftX;
-            const nextPanY = initialPan.current.y + deltaFocalY + focalShiftY;
-
-            scale.setValue(newScale);
-            pan.setValue({ x: nextPanX, y: nextPanY });
-          } else {
-            initialDistance.current = dist;
-            initialScale.current = currentScale.current;
-            initialFocal.current = currentFocal;
-            initialPan.current = { ...currentPan.current };
+          // Seamless transition if 2nd finger just arrived
+          if (gestureMode.current !== 'pinch' || !pinchStartDist.current) {
+            startPinch(t1, t2);
+            return;
           }
-        } else if (evt.nativeEvent.touches.length === 1) {
-          const nextPanX = initialPan.current.x + gs.dx;
-          const nextPanY = initialPan.current.y + gs.dy;
-          pan.setValue({ x: nextPanX, y: nextPanY });
+
+          const rawScale = (curDist / pinchStartDist.current) * pinchStartScale.current;
+          let effectiveScale = rawScale;
+
+          // Elastic rubberbanding past bounds
+          if (rawScale < 1.0) {
+            effectiveScale = 1.0 - (1.0 - rawScale) * 0.4;
+          } else if (rawScale > 4.5) {
+            effectiveScale = 4.5 + (rawScale - 4.5) * 0.35;
+          }
+          effectiveScale = Math.max(0.65, Math.min(effectiveScale, 6.0));
+
+          const curCenterX = (t1.pageX + t2.pageX) / 2;
+          const curCenterY = (t1.pageY + t2.pageY) / 2;
+
+          const newPanX = curCenterX - SCREEN_WIDTH / 2 - pinchOrigin.current.x * effectiveScale;
+          const newPanY = curCenterY - SCREEN_HEIGHT / 2 - pinchOrigin.current.y * effectiveScale;
+
+          scale.setValue(effectiveScale);
+          pan.setValue({ x: newPanX, y: newPanY });
+          currentScale.current = effectiveScale;
+          currentPan.current = { x: newPanX, y: newPanY };
+        }
+        // ONE FINGER PAN / PULL-DOWN-TO-DISMISS
+        else if (touches.length === 1) {
+          const t = touches[0];
+
+          // Seamless transition if 1 finger lifted during pinch
+          if (gestureMode.current !== 'pan') {
+            gestureMode.current = 'pan';
+            panStartTouch.current = { x: t.pageX, y: t.pageY };
+            panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+            pinchStartDist.current = null;
+            return;
+          }
+
+          const deltaX = t.pageX - panStartTouch.current.x;
+          const deltaY = t.pageY - panStartTouch.current.y;
+
+          if (currentScale.current <= 1.05) {
+            // Pull-down-to-dismiss at 1x
+            if (deltaY > 0) {
+              const newX = panStartPan.current.x + deltaX * 0.35;
+              const newY = panStartPan.current.y + deltaY;
+              pan.setValue({
+                x: newX,
+                y: newY,
+              });
+              currentPan.current = { x: newX, y: newY };
+              const fade = Math.min(0.7, deltaY / 400);
+              backdropOpacity.setValue(Math.max(0.25, 1 - fade));
+              scale.setValue(Math.max(0.85, 1 - deltaY / 1500));
+            } else {
+              const newX = panStartPan.current.x + deltaX * 0.35;
+              const newY = panStartPan.current.y + deltaY * 0.35;
+              pan.setValue({
+                x: newX,
+                y: newY,
+              });
+              currentPan.current = { x: newX, y: newY };
+            }
+          } else {
+            // Smooth 1:1 pan when zoomed in
+            const newX = panStartPan.current.x + deltaX;
+            const newY = panStartPan.current.y + deltaY;
+            pan.setValue({
+              x: newX,
+              y: newY,
+            });
+            currentPan.current = { x: newX, y: newY };
+          }
         }
       },
 
       onPanResponderRelease: (evt, gs) => {
-        initialDistance.current = null;
+        if (isDismissing.current) return;
+        const remainingTouches = evt.nativeEvent.touches;
+        if (remainingTouches && remainingTouches.length === 1) {
+          gestureMode.current = 'pan';
+          panStartTouch.current = { x: remainingTouches[0].pageX, y: remainingTouches[0].pageY };
+          panStartPan.current = { x: currentPan.current.x, y: currentPan.current.y };
+          pinchStartDist.current = null;
+          return;
+        }
 
-        // Check if user tapped without dragging/panning in blank space to dismiss
-        if (Math.abs(gs.dx) < 6 && Math.abs(gs.dy) < 6) {
+        const wasMode = gestureMode.current;
+        gestureMode.current = 'none';
+        pinchStartDist.current = null;
+
+        const duration = Date.now() - touchStartTime.current;
+        const totalMove = Math.hypot(gs.dx, gs.dy);
+
+        // Double-Tap Detection (taps with movement < 16px within 350ms)
+        if (totalMove < 16 && duration < 350) {
+          const now = Date.now();
           const touch = evt.nativeEvent;
-          const curW = imgWidth * currentScale.current;
-          const curH = imgHeight * currentScale.current;
-          const imgTop = (SCREEN_HEIGHT - curH) / 2 + currentPan.current.y;
-          const imgBottom = (SCREEN_HEIGHT + curH) / 2 + currentPan.current.y;
-          const imgLeft = (SCREEN_WIDTH - curW) / 2 + currentPan.current.x;
-          const imgRight = (SCREEN_WIDTH + curW) / 2 + currentPan.current.x;
 
-          if (
-            touch.pageY < imgTop ||
-            touch.pageY > imgBottom ||
-            touch.pageX < imgLeft ||
-            touch.pageX > imgRight
-          ) {
-            setModalVisible(false);
+          if (now - lastTapTime.current < 380) {
+            lastTapTime.current = 0;
+            handleDoubleTapAt(touch.pageX, touch.pageY);
+            return;
+          } else {
+            lastTapTime.current = now;
+            // NOTE: Clicking blank space DOES NOT close the modal!
             return;
           }
         }
 
+        // Pull-down-to-dismiss at 1x
+        if (wasMode === 'pan' && currentScale.current <= 1.05) {
+          const dy = gs.dy;
+          const vy = gs.vy;
+          if (dy > 120 || (dy > 50 && vy > 0.7)) {
+            isDismissing.current = true;
+            Animated.parallel([
+              Animated.timing(pan, {
+                toValue: { x: currentPan.current.x, y: SCREEN_HEIGHT },
+                duration: 200,
+                useNativeDriver: true,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 0,
+                duration: 180,
+                useNativeDriver: true,
+              }),
+            ]).start(() => {
+              setModalVisible(false);
+              if (resetTimerRef.current) {
+                clearTimeout(resetTimerRef.current);
+              }
+              resetTimerRef.current = setTimeout(() => {
+                isDismissing.current = false;
+                resetZoom(false);
+              }, 350);
+            });
+            return;
+          } else {
+            Animated.parallel([
+              Animated.spring(scale, {
+                toValue: 1,
+                useNativeDriver: true,
+                bounciness: 4,
+                speed: 16,
+              }),
+              Animated.spring(pan, {
+                toValue: { x: 0, y: 0 },
+                useNativeDriver: true,
+                bounciness: 4,
+                speed: 16,
+              }),
+              Animated.timing(backdropOpacity, {
+                toValue: 1,
+                duration: 150,
+                useNativeDriver: true,
+              }),
+            ]).start();
+            return;
+          }
+        }
+
+        // Release for Pinch or Zoomed-in Pan:
+        backdropOpacity.setValue(1);
         if (currentScale.current < 1.0) {
           resetZoom(true);
-        } else if (currentScale.current > 4.0) {
+        } else if (currentScale.current > 4.5) {
           Animated.spring(scale, {
-            toValue: 3.5,
+            toValue: 4.0,
             useNativeDriver: true,
             bounciness: 4,
             speed: 16,
           }).start();
+          clampPanToBounds(4.0);
         } else {
           clampPanToBounds(currentScale.current);
         }
       },
 
       onPanResponderTerminate: () => {
-        initialDistance.current = null;
+        gestureMode.current = 'none';
+        pinchStartDist.current = null;
         if (currentScale.current < 1.0) {
           resetZoom(true);
         }
+        backdropOpacity.setValue(1);
       },
     })
   ).current;
@@ -294,10 +503,7 @@ export default function ZoomableImageCard({
       {/* Clean Inline Picture Card */}
       <TouchableOpacity
         activeOpacity={0.9}
-        onPress={() => {
-          resetZoom(false);
-          setModalVisible(true);
-        }}
+        onPress={handleOpenModal}
         style={[
           styles.inlineCard,
           isLight ? styles.inlineCardLight : styles.inlineCardDark,
@@ -331,25 +537,24 @@ export default function ZoomableImageCard({
         </View>
       </TouchableOpacity>
 
-      {/* Gallery-Grade Full-Screen Modal with Focal Point Zoom (Blank Space Tap Closes) */}
+      {/* Translucent Full-Screen Modal with Transparent Blank Space */}
       {modalVisible && (
         <Modal
           visible={true}
           transparent={true}
           animationType="fade"
           presentationStyle="overFullScreen"
-          onRequestClose={() => setModalVisible(false)}
+          onRequestClose={handleCloseModal}
         >
-          <View style={styles.modalBackdrop} {...panResponder.panHandlers}>
-            {/* Absolute Fullscreen Tap-Outside-to-Close Touch Layer */}
-            <TouchableOpacity
-              activeOpacity={1}
-              style={StyleSheet.absoluteFillObject}
-              onPress={() => setModalVisible(false)}
-            />
-
+          <Animated.View
+            style={[
+              styles.modalBackdrop,
+              { opacity: backdropOpacity },
+            ]}
+            {...panResponder.panHandlers}
+          >
             {/* Centered Focal-Zoomable Image Container */}
-            <View style={styles.modalContentContainer} pointerEvents="none">
+            <View style={styles.modalContentContainer} pointerEvents="box-none">
               <Animated.Image
                 source={{ uri }}
                 style={{
@@ -365,7 +570,25 @@ export default function ZoomableImageCard({
                 resizeMode="contain"
               />
             </View>
-          </View>
+
+            {/* Prominent Floating Close Button (Top-Right) */}
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={handleCloseModal}
+              activeOpacity={0.8}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              accessibilityLabel="Close image viewer"
+            >
+              <X size={24} color="#ffffff" strokeWidth={2.5} />
+            </TouchableOpacity>
+
+            {/* Caption Pill (only if caption provided) */}
+            {!!caption && (
+              <View style={styles.modalHintPill} pointerEvents="none">
+                <Text style={styles.modalHintText}>{caption}</Text>
+              </View>
+            )}
+          </Animated.View>
         </Modal>
       )}
     </View>
@@ -394,6 +617,7 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: '100%',
+    maxHeight: 420,
     backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -427,10 +651,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Modal Backdrop & Content
+  // Translucent Modal Backdrop (Study text softly visible behind)
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -440,5 +664,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+  },
+
+  // Prominent Floating Close Button
+  modalCloseBtn: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 36,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15, 23, 42, 0.90)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+  },
+  modalHintPill: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 42 : 26,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    zIndex: 998,
+    elevation: 6,
+  },
+  modalHintText: {
+    color: '#f8fafc',
+    fontSize: 11.5,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });

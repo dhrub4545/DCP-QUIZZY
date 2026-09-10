@@ -2,18 +2,22 @@
   "expo": {
     "name": "QUIZZY",
     "slug": "quizzy",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0f172a",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/icon.png"
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "backgroundColor": "#0f172a",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
@@ -31,6 +35,14 @@
         "projectId": "740787c2-e30c-4d52-b9fb-f5e0a918a765"
       }
     },
-    "owner": "dhrub4545"
+    "owner": "dhrub4545",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
   }
 }

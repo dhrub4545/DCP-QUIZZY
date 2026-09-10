@@ -38,8 +38,8 @@ import {
   Shield,
   RotateCcw,
 } from 'lucide-react-native';
-import { fetchQuizzes, fetchQuizById, fetchQuizChunkApi, fetchAiExplanationApi, fetchQuestionsByTopicApi } from '../services/api';
-import { saveStudyProgress, getStudyProgress, getAllStudyProgress } from '../services/storage';
+import { fetchQuizzes, fetchQuizById, fetchQuizChunkApi, fetchAiExplanationApi, fetchQuestionsByTopicApi, fetchStudyStructureApi } from '../services/api';
+import { saveStudyProgress, getStudyProgress, getAllStudyProgress, getPreservedStudyStructure, savePreservedStudyStructure } from '../services/storage';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import ZoomableImageCard from '../components/ZoomableImageCard';
 import AiChatModal from '../components/AiChatModal';
@@ -51,11 +51,14 @@ import {
   setCachedQuizzes,
   getCachedStudyProgress,
   setCachedStudyProgress,
+  getCachedStudyStructure,
+  setCachedStudyStructure,
 } from '../services/appStateCache';
 
 // Persistent in-memory caches to make opening books and topics instant (0ms)
 const globalQuizCache = new Map();
 const globalTopicCache = new Map();
+const globalQuizQuestionsCache = new Map();
 
 const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -76,6 +79,50 @@ const getCorrectOptionIndex = (item) => {
   }
   return 0;
 };
+
+// Helper to get a globally unique key for each question across quizzes/sets
+function getQuestionKey(item, index) {
+  if (item && item._id) return String(item._id);
+  const quizKey = item?.quizId || item?.quizTitle || 'quiz';
+  const qIdx = item?.globalIndex !== undefined ? item.globalIndex : (index !== undefined ? index : (item?.questionNumber !== undefined ? item.questionNumber - 1 : 0));
+  return `${quizKey}_q_${qIdx}`;
+}
+
+// Render question text with bold **anytext** formatting
+function renderFormattedQuestionText(text, isOption = false) {
+  if (!text) return null;
+  let str = String(text)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(b|strong)>/gi, '**')
+    .replace(/<\/?u>/gi, '');
+
+  // Collapse consecutive bold boundary tokens like **** **** or ******* into a space
+  str = str.replace(/\*{2,}\s*\*{2,}/g, ' ');
+
+  // Normalize asymmetric/typo asterisks like *Word** or **Word* into standard **Word**
+  str = str
+    .replace(/(^|[^\*])\*([^\*\s][^\*]*?)\*\*([^\*]|$)/g, '$1**$2**$3')
+    .replace(/(^|[^\*])\*\*([^\*\s][^\*]*?)\*([^\*]|$)/g, '$1**$2**$3');
+
+  const regex = /(\*{2,}[^*]+\*{2,})/g;
+  const parts = str.split(regex);
+
+  return parts.map((part, idx) => {
+    if (!part) return null;
+    if (/^\*{2,}/.test(part) && /\*{2,}$/.test(part)) {
+      const boldText = part.replace(/^\*{2,}|\*{2,}$/g, '');
+      return (
+        <Text
+          key={idx}
+          style={isOption ? styles.pdfOptionBoldText : styles.pdfQuestionBoldText}
+        >
+          {boldText}
+        </Text>
+      );
+    }
+    return part.replace(/\*{2,}/g, '');
+  });
+}
 
 // Memoized Question Card Component with Answers Toggle & Interactive Choice Feedback
 const PdfQuestionCard = memo(({
@@ -113,6 +160,18 @@ const PdfQuestionCard = memo(({
   const explanationPicUrl = item.cloudanary_link || item.cloudinary_link || item.explanationPic || item.explanationImage || item.explanation_pic;
   const displayNumber = item.questionNumber || (item.globalIndex !== undefined ? item.globalIndex + 1 : index + 1);
 
+  const rawQText = item.questionText || '';
+  const hasInlinePic = /\(\(pic\)\)/i.test(rawQText);
+  let partBefore = null;
+  let partAfter = null;
+
+  if (hasInlinePic) {
+    const picIdx = rawQText.search(/\(\(pic\)\)/i);
+    partBefore = rawQText.slice(0, picIdx).trim();
+    // Strip all remaining ((pic)) occurrences to ensure no duplicate placeholders are shown
+    partAfter = rawQText.slice(picIdx).replace(/\(\(pic\)\)/gi, '').trim();
+  }
+
   return (
     <View style={styles.pdfQCard}>
       {/* Question Top Bar */}
@@ -140,17 +199,47 @@ const PdfQuestionCard = memo(({
 
       {isExpanded && (
         <View style={styles.pdfQBody}>
-          <Text style={styles.pdfQuestionText}>{item.questionText}</Text>
+          {/* Question Text & Diagram */}
+          {hasInlinePic ? (
+            <>
+              {partBefore ? (
+                <Text style={styles.pdfQuestionText}>
+                  {renderFormattedQuestionText(partBefore)}
+                </Text>
+              ) : null}
 
-          {/* Question Image (displayed below question and before options) */}
-          {questionPicUrl ? (
-            <ZoomableImageCard
-              uri={questionPicUrl}
-              caption={`Question ${displayNumber} Diagram`}
-              theme="light"
-              style={{ marginTop: 8, marginBottom: 12 }}
-            />
-          ) : null}
+              {questionPicUrl ? (
+                <ZoomableImageCard
+                  uri={questionPicUrl}
+                  caption={`Question ${displayNumber} Diagram`}
+                  theme="light"
+                  style={{ marginTop: 4, marginBottom: 12 }}
+                />
+              ) : null}
+
+              {partAfter ? (
+                <Text style={styles.pdfQuestionText}>
+                  {renderFormattedQuestionText(partAfter)}
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <Text style={styles.pdfQuestionText}>
+                {renderFormattedQuestionText(rawQText.replace(/\(\(pic\)\)/gi, '').trim())}
+              </Text>
+
+              {/* Question Image (displayed below question and before options when no ((pic)) in text) */}
+              {questionPicUrl ? (
+                <ZoomableImageCard
+                  uri={questionPicUrl}
+                  caption={`Question ${displayNumber} Diagram`}
+                  theme="light"
+                  style={{ marginTop: 8, marginBottom: 12 }}
+                />
+              ) : null}
+            </>
+          )}
 
           {/* Options List */}
           <View style={styles.pdfOptionsList}>
@@ -222,7 +311,7 @@ const PdfQuestionCard = memo(({
                   onPress={() => onSelectOption(index, optIdx)}
                 >
                   <Text style={letterStyle}>{optionLabels[optIdx]}.</Text>
-                  <Text style={textStyle}>{optText}</Text>
+                  <Text style={textStyle}>{renderFormattedQuestionText(optText, true)}</Text>
                   {badgeComponent}
                 </TouchableOpacity>
               );
@@ -296,7 +385,8 @@ const PdfQuestionCard = memo(({
     prev.userChoice === next.userChoice &&
     prev.aiExplanation === next.aiExplanation &&
     prev.isLoadingAi === next.isLoadingAi &&
-    (prev.item?._id || prev.item?.questionNumber) === (next.item?._id || next.item?.questionNumber)
+    (String(prev.item?._id || prev.item?.questionNumber) === String(next.item?._id || next.item?.questionNumber)) &&
+    (String(prev.item?.quizId || prev.item?.quizTitle) === String(next.item?.quizId || next.item?.quizTitle))
   );
 });
 
@@ -304,18 +394,19 @@ const PdfQuestionCard = memo(({
 function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const { isGlass } = useTheme();
 
-  // Directory Quizzes Metadata (initialized with instant shared cache)
-  const [quizzes, setQuizzes] = useState(getCachedQuizzes() || []);
-  const [quizCache, setQuizCache] = useState({});
+  // Dynamic Study Directory Folders & File Lists (Initialized with instant shared cache)
+  const initialStructure = getCachedStudyStructure();
+  const [folders, setFolders] = useState(initialStructure?.folders || []);
+  const [foldersHash, setFoldersHash] = useState(initialStructure?.hash || null);
   const [studyProgressMap, setStudyProgressMap] = useState(getCachedStudyProgress() || {});
   
-  const [loading, setLoading] = useState(!getCachedQuizzes());
+  const [loading, setLoading] = useState(!initialStructure?.folders?.length);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingCardId, setLoadingCardId] = useState(null);
   const [isOpeningReader, setIsOpeningReader] = useState(false);
   const [openingTitle, setOpeningTitle] = useState('');
 
-  // Folder Wise Navigation State: 'all' | 'nmcle' | 'book' | 'topic' | 'custom'
+  // Folder Wise Navigation State: 'all' | folderId
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -326,6 +417,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const [readerItem, setReaderItem] = useState(null);
   const [readerShowAnswers, setReaderShowAnswers] = useState(false);
   const [userChoices, setUserChoices] = useState({});
+  const [readerFullQuestions, setReaderFullQuestions] = useState(null);
   
   // Bookmark & Navigation Index
   const [initialBookmarkIndex, setInitialBookmarkIndex] = useState(0);
@@ -336,6 +428,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   // AI Explanation & Chat states
   const [aiExplanations, setAiExplanations] = useState({});
   const [loadingAiIdx, setLoadingAiIdx] = useState(null);
+  const loadingAiKeyRef = useRef(null);
 
   // AI Chat Modal state
   const [chatModalVisible, setChatModalVisible] = useState(false);
@@ -345,6 +438,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const readerItemRef = useRef(null);
   const userChoicesRef = useRef({});
   const readerShowAnswersRef = useRef(false);
+  const foldersHashRef = useRef(foldersHash);
 
   const studyStateRef = useRef({
     chatModalVisible,
@@ -354,6 +448,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     lastViewedIndex,
     userChoices,
     readerShowAnswers,
+    foldersHash,
   });
 
   studyStateRef.current = {
@@ -364,7 +459,12 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     lastViewedIndex,
     userChoices,
     readerShowAnswers,
+    foldersHash,
   };
+
+  useEffect(() => {
+    foldersHashRef.current = foldersHash;
+  }, [foldersHash]);
 
   useEffect(() => {
     readerItemRef.current = readerItem;
@@ -378,22 +478,44 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     readerShowAnswersRef.current = readerShowAnswers;
   }, [readerShowAnswers]);
 
-  // Load Directory & Stored Bookmarks
+  // Load Directory Structure & Stored Bookmarks
   const loadDirectoryData = async (showSpinner = false) => {
     try {
-      if (showSpinner && !getCachedQuizzes()) {
+      const cached = getCachedStudyStructure();
+      if (showSpinner && (!cached || !cached.folders || cached.folders.length === 0)) {
         setLoading(true);
       }
-      const [quizData, storedProgress] = await Promise.all([
-        fetchQuizzes(),
-        getAllStudyProgress(),
+
+      // Check preserved local storage if in-memory cache was empty for 0ms instant display
+      if (!cached || !cached.folders || cached.folders.length === 0) {
+        const preserved = await getPreservedStudyStructure();
+        if (preserved && Array.isArray(preserved.folders) && preserved.folders.length > 0) {
+          setCachedStudyStructure(preserved);
+          setFolders(preserved.folders);
+          setFoldersHash(preserved.hash);
+          setLoading(false);
+        }
+      }
+
+      // Fetch DB study structure (lightweight dynamic manifest) & stored progress in parallel
+      const [structureData, storedProgress] = await Promise.all([
+        fetchStudyStructureApi().catch(err => {
+          console.warn('Study structure API fallback:', err.message);
+          return null;
+        }),
+        getAllStudyProgress().catch(() => ({})),
       ]);
 
-      if (quizData && quizData.quizzes) {
-        setCachedQuizzes(quizData.quizzes);
-        setQuizzes(quizData.quizzes);
-      } else {
-        setQuizzes([]);
+      if (structureData && Array.isArray(structureData.folders)) {
+        const currentHash = foldersHashRef.current;
+        // Check if DB updated: if hash differs or not yet cached, update local preservation and screen state
+        if (!currentHash || structureData.hash !== currentHash) {
+          setCachedStudyStructure(structureData);
+          setFolders(structureData.folders);
+          setFoldersHash(structureData.hash);
+          // Preserve locally in AsyncStorage
+          await savePreservedStudyStructure(structureData);
+        }
       }
 
       if (storedProgress) {
@@ -415,10 +537,11 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
 
   useFocusEffect(
     useCallback(() => {
-      const cached = getCachedQuizzes();
+      const cached = getCachedStudyStructure();
       const cachedProgress = getCachedStudyProgress();
-      if (cached) {
-        setQuizzes(cached);
+      if (cached && Array.isArray(cached.folders) && cached.folders.length > 0) {
+        setFolders(cached.folders);
+        setFoldersHash(cached.hash);
         setLoading(false);
       }
       if (cachedProgress) {
@@ -429,7 +552,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadDirectoryData();
+    loadDirectoryData(false);
   };
 
   const handleTabPress = (tabName) => {
@@ -505,6 +628,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         const allTopicQs = globalTopicCache.get(currentItem.title.trim().toLowerCase()) || [];
         const slice = allTopicQs.slice(prevOffset, currentItem.startIndex).map((q, idx) => ({
           ...q,
+          quizId: currentItem.id,
           globalIndex: prevOffset + idx,
           questionNumber: prevOffset + idx + 1,
           quizTitle: currentItem.title,
@@ -523,6 +647,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         if (chunkRes && chunkRes.quiz && Array.isArray(chunkRes.quiz.questions)) {
           const slice = chunkRes.quiz.questions.map((q, idx) => ({
             ...q,
+            quizId: currentItem.id,
             globalIndex: prevOffset + idx,
             questionNumber: prevOffset + idx + 1,
             quizTitle: currentItem.title,
@@ -571,6 +696,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         const allTopicQs = globalTopicCache.get(currentItem.title.trim().toLowerCase()) || [];
         const slice = allTopicQs.slice(nextOffset, nextOffset + nextLimit).map((q, idx) => ({
           ...q,
+          quizId: currentItem.id,
           globalIndex: nextOffset + idx,
           questionNumber: nextOffset + idx + 1,
           quizTitle: currentItem.title,
@@ -589,6 +715,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         if (chunkRes && chunkRes.quiz && Array.isArray(chunkRes.quiz.questions)) {
           const slice = chunkRes.quiz.questions.map((q, idx) => ({
             ...q,
+            quizId: currentItem.id,
             globalIndex: nextOffset + idx,
             questionNumber: nextOffset + idx + 1,
             quizTitle: currentItem.title,
@@ -636,16 +763,27 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
 
   // Open Book with instant windowed lazy loading directly from the marked question position
   const handleOpenBook = async (quizSummary) => {
-    try {
-      setOpeningTitle(quizSummary.title || 'Medical Book');
-      setIsOpeningReader(true);
-      setLoadingCardId(quizSummary._id);
+    const targetQuizId = quizSummary?._id || quizSummary?.id;
+    if (!targetQuizId) return;
 
-      const savedProgress = await getStudyProgress(quizSummary._id);
+    try {
+      setOpeningTitle(quizSummary.title || 'Study Material');
+      setIsOpeningReader(true);
+      setLoadingCardId(targetQuizId);
+
+      // Failsafe watchdog timer (ensures overlay never hangs under slow networks)
+      const safetyWatchdog = setTimeout(() => {
+        setIsOpeningReader(false);
+        setLoadingCardId(null);
+      }, 5000);
+
+      const savedProgress = await getStudyProgress(targetQuizId);
       const bookmarkIndex = Number(savedProgress?.lastIndex || 0); // 0-based index
       const savedChoices = savedProgress?.userChoices || {};
-      const isShow = cardShowAnswers[quizSummary._id] ?? (savedProgress?.showAnswers || false);
-      const isNmcle = (quizSummary.title || '').toUpperCase().includes('NMCLE') || ((quizSummary.subject || '').toUpperCase().includes('NMCLE'));
+      const isShow = cardShowAnswers[targetQuizId] ?? (savedProgress?.showAnswers || false);
+      const isParadise = (quizSummary.folderType === 'paradise') || (quizSummary.title || '').toUpperCase().includes('PARADISE') || ((quizSummary.subject || '').toUpperCase().includes('PARADISE'));
+      const isNmcle = !isParadise && ((quizSummary.title || '').toUpperCase().includes('NMCLE') || ((quizSummary.subject || '').toUpperCase().includes('NMCLE')));
+      const folderTypeVal = isParadise ? 'paradise' : isNmcle ? 'nmcle' : 'book';
 
       const totalCount = quizSummary.questionCount || 180;
       const initialLimit = 20;
@@ -653,12 +791,13 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       const initialOffset = Math.max(0, Math.min(bookmarkIndex, Math.max(0, totalCount - 1)));
 
       // Fast initial slice fetch (~40ms) - Only fetching the active window
-      const chunkRes = await fetchQuizChunkApi(quizSummary._id, initialOffset, initialLimit).catch(() => null);
+      const chunkRes = await fetchQuizChunkApi(targetQuizId, initialOffset, initialLimit).catch(() => null);
 
       let initialQuestions = [];
       if (chunkRes && chunkRes.quiz && Array.isArray(chunkRes.quiz.questions)) {
         initialQuestions = chunkRes.quiz.questions.map((q, idx) => ({
           ...q,
+          quizId: targetQuizId,
           globalIndex: initialOffset + idx,
           questionNumber: initialOffset + idx + 1,
           quizTitle: quizSummary.title,
@@ -676,26 +815,46 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       setExpandedIndices({});
 
       const itemObj = {
-        id: quizSummary._id,
+        id: targetQuizId,
         title: quizSummary.title,
         subject: quizSummary.subject || 'General',
-        type: isNmcle ? 'nmcle' : 'book',
-        folderType: isNmcle ? 'nmcle' : 'book',
+        type: folderTypeVal,
+        folderType: folderTypeVal,
         totalCount: totalCount,
         startIndex: initialOffset,
         endIndex: initialOffset + Math.max(0, initialQuestions.length - 1),
         allQuestions: initialQuestions,
       };
 
+      clearTimeout(safetyWatchdog);
+
       // Open Reader Screen IMMEDIATELY (< 60ms total response time!)
       setReaderItem(itemObj);
       persistProgress(itemObj, bookmarkIndex, savedChoices, isShow);
+
+      // Check if full quiz questions are cached or fetch in background for counter accuracy
+      const cachedFullQs = globalQuizQuestionsCache.get(targetQuizId);
+      if (cachedFullQs && Array.isArray(cachedFullQs)) {
+        setReaderFullQuestions(cachedFullQs);
+      } else {
+        setReaderFullQuestions(null);
+        fetchQuizById(targetQuizId)
+          .then((res) => {
+            if (res && res.quiz && Array.isArray(res.quiz.questions)) {
+              globalQuizQuestionsCache.set(targetQuizId, res.quiz.questions);
+              if (readerItemRef.current?.id === targetQuizId) {
+                setReaderFullQuestions(res.quiz.questions);
+              }
+            }
+          })
+          .catch(() => {});
+      }
 
       setTimeout(() => {
         setIsOpeningReader(false);
         setLoadingCardId(null);
         isInitialMountRef.current = false;
-      }, 400);
+      }, 300);
     } catch (err) {
       console.error('Error in instant lazy loader:', err.message);
       setIsOpeningReader(false);
@@ -707,11 +866,17 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const handleOpenTopic = async (topicCard) => {
     const topicName = topicCard.title;
     const targetClean = topicName.trim().toLowerCase();
+    const topicId = topicCard.id || topicCard._id;
 
     try {
       setOpeningTitle(topicName || 'Topic Module');
       setIsOpeningReader(true);
-      setLoadingCardId(topicCard.id);
+      setLoadingCardId(topicId);
+
+      const safetyWatchdog = setTimeout(() => {
+        setIsOpeningReader(false);
+        setLoadingCardId(null);
+      }, 5000);
 
       // 1. Check persistent global topic cache (0ms instant)
       let topicQuestions = globalTopicCache.get(targetClean);
@@ -754,15 +919,16 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       }
 
       const totalCount = topicQuestions.length;
-      const savedProgress = await getStudyProgress(topicCard.id);
+      const savedProgress = await getStudyProgress(topicId);
       const bookmarkIndex = Number(savedProgress?.lastIndex || 0);
       const savedChoices = savedProgress?.userChoices || {};
-      const isShow = cardShowAnswers[topicCard.id] ?? (savedProgress?.showAnswers || false);
+      const isShow = cardShowAnswers[topicId] ?? (savedProgress?.showAnswers || false);
 
       const initialOffset = Math.max(0, Math.min(bookmarkIndex, Math.max(0, totalCount - 1)));
       const initialLimit = 20;
       const slice = topicQuestions.slice(initialOffset, initialOffset + initialLimit).map((q, idx) => ({
         ...q,
+        quizId: topicId,
         globalIndex: initialOffset + idx,
         questionNumber: initialOffset + idx + 1,
         quizTitle: topicName,
@@ -779,7 +945,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       setExpandedIndices({});
 
       const itemObj = {
-        id: topicCard.id,
+        id: topicId,
         title: topicName,
         subject: 'Topic Module',
         type: 'topic',
@@ -790,14 +956,17 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         allQuestions: slice,
       };
 
+      clearTimeout(safetyWatchdog);
+
       setReaderItem(itemObj);
+      setReaderFullQuestions(topicQuestions);
       persistProgress(itemObj, bookmarkIndex, savedChoices, isShow);
 
       setTimeout(() => {
         setIsOpeningReader(false);
         setLoadingCardId(null);
         isInitialMountRef.current = false;
-      }, 400);
+      }, 300);
     } catch (err) {
       console.error('Error loading topic lazily:', err.message);
       setIsOpeningReader(false);
@@ -810,6 +979,10 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const lastViewedIndexRef = useRef(-1);
 
   const handleCloseReader = useCallback(() => {
+    setIsOpeningReader(false);
+    setLoadingCardId(null);
+    setLoadingAiIdx(null);
+    setReaderFullQuestions(null);
     const currentReader = studyStateRef.current.readerItem;
     if (currentReader) {
       const currentIdx =
@@ -951,93 +1124,59 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     }, 80);
   }, []);
 
-  // Classification Helpers
-  const isNmcleQuiz = useCallback((q) => {
-    const t = (q.title || '').toUpperCase();
-    const s = (q.subject || '').toUpperCase();
-    return t.includes('NMCLE') || s.includes('NMCLE');
-  }, []);
+  // Active Folder Object (if currently inside a specific folder)
+  const activeFolder = useMemo(() => {
+    if (selectedFolder === 'all') return null;
+    return folders.find((f) => f.id === selectedFolder) || null;
+  }, [folders, selectedFolder]);
 
-  const isCustomQuiz = useCallback((q) => {
-    return q.isCustom === true || q.creator === 'user';
-  }, []);
-
-  const isBookQuiz = useCallback((q) => {
-    return !isNmcleQuiz(q) && !isCustomQuiz(q);
-  }, [isNmcleQuiz, isCustomQuiz]);
-
-  // Build Directory Cards Lists per Folder (Memoized)
-  const nmcleCards = useMemo(() => quizzes.filter(isNmcleQuiz).map((quiz) => ({
-    id: quiz._id,
-    _id: quiz._id,
-    title: quiz.title,
-    subject: quiz.subject || 'NMCLE Exam Set',
-    questionCount: quiz.questionCount || 0,
-    folderType: 'nmcle',
-  })), [quizzes, isNmcleQuiz]);
-
-  const bookCards = useMemo(() => quizzes.filter(isBookQuiz).map((quiz) => ({
-    id: quiz._id,
-    _id: quiz._id,
-    title: quiz.title,
-    subject: quiz.subject || 'Medical Book',
-    questionCount: quiz.questionCount || 0,
-    folderType: 'book',
-  })), [quizzes, isBookQuiz]);
-
-  const customCards = useMemo(() => quizzes.filter(isCustomQuiz).map((quiz) => ({
-    id: quiz._id,
-    _id: quiz._id,
-    title: quiz.title,
-    subject: quiz.subject || 'Custom Quiz',
-    questionCount: quiz.questionCount || 0,
-    folderType: 'custom',
-  })), [quizzes, isCustomQuiz]);
-
-  // Build Topics Directory List (Memoized)
-  const topicCards = useMemo(() => {
-    const topicMap = {};
-    quizzes.forEach((quiz) => {
-      (quiz.topics || []).forEach((top) => {
-        const trimmed = (top || 'General Topics').trim();
-        if (!topicMap[trimmed]) {
-          topicMap[trimmed] = 0;
-        }
-        topicMap[trimmed] += 1;
-      });
+  // All Cards across non-topic folders for global search
+  const allCards = useMemo(() => {
+    const list = [];
+    folders.forEach((f) => {
+      if (f.id !== 'topic') {
+        list.push(...(f.files || []));
+      }
     });
-
-    return Object.keys(topicMap).map((topicName, idx) => ({
-      id: `topic_${idx}`,
-      title: topicName,
-      bookCount: topicMap[topicName],
-      folderType: 'topic',
-    }));
-  }, [quizzes]);
-
-  const totalNmcleQuestions = useMemo(() => nmcleCards.reduce((sum, c) => sum + (c.questionCount || 0), 0), [nmcleCards]);
-  const totalBookQuestions = useMemo(() => bookCards.reduce((sum, c) => sum + (c.questionCount || 0), 0), [bookCards]);
+    return list;
+  }, [folders]);
 
   // Determine active cards list based on selectedFolder (Memoized)
   const activeFolderCards = useMemo(() => {
-    if (selectedFolder === 'nmcle') return nmcleCards;
-    if (selectedFolder === 'book') return bookCards;
-    if (selectedFolder === 'custom') return customCards;
-    if (selectedFolder === 'topic') return topicCards;
-    return [...nmcleCards, ...bookCards, ...customCards];
-  }, [selectedFolder, nmcleCards, bookCards, customCards, topicCards]);
+    if (selectedFolder === 'all') return allCards;
+    return activeFolder?.files || [];
+  }, [selectedFolder, activeFolder, allCards]);
 
   // Filter Cards by search query (Memoized)
   const filteredCards = useMemo(() => {
-    if (!searchQuery.trim()) return activeFolderCards;
+    const sourceList = selectedFolder === 'all' ? allCards : (activeFolder?.files || []);
+    if (!searchQuery.trim()) return sourceList;
     const query = searchQuery.toLowerCase().trim();
-    return activeFolderCards.filter((card) => {
+    return sourceList.filter((card) => {
       return (
-        card.title.toLowerCase().includes(query) ||
+        (card.title && card.title.toLowerCase().includes(query)) ||
         (card.subject && card.subject.toLowerCase().includes(query))
       );
     });
-  }, [activeFolderCards, searchQuery]);
+  }, [selectedFolder, allCards, activeFolder, searchQuery]);
+
+  // Hardware Back Handler to navigate back to All Folders smoothly
+  useEffect(() => {
+    const onBackPress = () => {
+      if (readerItemRef.current) {
+        handleCloseReader();
+        return true;
+      }
+      if (selectedFolder !== 'all') {
+        setSelectedFolder('all');
+        return true;
+      }
+      return false;
+    };
+
+    const backSub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => backSub.remove();
+  }, [selectedFolder, handleCloseReader]);
 
   const toggleExpand = useCallback((globalIdx) => {
     setExpandedIndices((prev) => ({
@@ -1090,9 +1229,11 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   }, [userChoices, persistProgress]);
 
   const handleGenerateAiExplanation = useCallback(async (item, globalIdx) => {
-    if (aiExplanations[globalIdx]) return;
+    const qKey = getQuestionKey(item, globalIdx);
+    if (loadingAiKeyRef.current === qKey) return;
+    loadingAiKeyRef.current = qKey;
+    setLoadingAiIdx(qKey);
     try {
-      setLoadingAiIdx(globalIdx);
       const correctOptIdx = getCorrectOptionIndex(item);
       const correctAnswerLetter =
         item.correctAnswerLetter || optionLabels[correctOptIdx] || 'A';
@@ -1102,13 +1243,25 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         options: item.options || [],
         correctAnswerLetter,
         explanation: item.explanation || '',
+        forceRefresh: Boolean(aiExplanations[qKey] || item.aiExplanation),
       });
 
       if (res && res.explanation) {
         setAiExplanations((prev) => ({
           ...prev,
-          [globalIdx]: res.explanation,
+          [qKey]: res.explanation,
         }));
+        setReaderItem((prev) => {
+          if (!prev || !Array.isArray(prev.allQuestions)) return prev;
+          const updated = prev.allQuestions.map((q, qIdx) => {
+            const thisKey = getQuestionKey(q, q.globalIndex !== undefined ? q.globalIndex : qIdx);
+            if (thisKey === qKey) {
+              return { ...q, aiExplanation: res.explanation };
+            }
+            return q;
+          });
+          return { ...prev, allQuestions: updated };
+        });
       }
     } catch (err) {
       console.error('Error fetching AI explanation in Study mode:', err);
@@ -1117,9 +1270,10 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         err.response?.data?.message || err.message || 'AI service is temporarily busy. Please try again in a moment!'
       );
     } finally {
+      loadingAiKeyRef.current = null;
       setLoadingAiIdx(null);
     }
-  }, [aiExplanations]);
+  }, []);
 
   const handleOpenAiChat = useCallback((item) => {
     const correctOptIdx = getCorrectOptionIndex(item);
@@ -1137,11 +1291,15 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   }, []);
 
   const questionKeyExtractor = useCallback((item, index) => {
-    return item._id || (item.globalIndex !== undefined ? `pdf_q_${item.globalIndex}` : `pdf_q_${index}`);
+    return getQuestionKey(item, index);
   }, []);
 
   const renderQuestionItem = useCallback(({ item, index }) => {
     const globalIdx = item.globalIndex !== undefined ? item.globalIndex : index;
+    const qKey = getQuestionKey(item, globalIdx);
+    const hasAiExplanation = aiExplanations[qKey] || item.aiExplanation;
+    const isThisLoading = loadingAiIdx === qKey || (loadingAiIdx !== null && (loadingAiIdx === globalIdx || loadingAiIdx === item.questionNumber));
+
     return (
       <PdfQuestionCard
         item={item}
@@ -1151,8 +1309,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         showAnswers={readerShowAnswers}
         userChoice={userChoices[globalIdx]}
         onSelectOption={handleSelectOption}
-        aiExplanation={aiExplanations[globalIdx]}
-        isLoadingAi={loadingAiIdx === globalIdx}
+        aiExplanation={hasAiExplanation}
+        isLoadingAi={Boolean(isThisLoading)}
         onGenerateAiExplanation={handleGenerateAiExplanation}
         onOpenAiChat={handleOpenAiChat}
       />
@@ -1169,6 +1327,66 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     handleOpenAiChat,
   ]);
 
+  // Memoized count of ONLY the correct answers selected in the study PDF view page
+  const correctAnswersCount = useMemo(() => {
+    if (!readerItem || !userChoices) return 0;
+
+    const choiceKeys = Object.keys(userChoices);
+    if (choiceKeys.length === 0) return 0;
+
+    // Fast question lookup map
+    const qMap = new Map();
+
+    // 1. Full questions from state or global cache
+    const fullList =
+      readerFullQuestions ||
+      (readerItem.id ? globalQuizQuestionsCache.get(readerItem.id) : null);
+    if (Array.isArray(fullList)) {
+      fullList.forEach((q, idx) => {
+        const gIdx = q.globalIndex !== undefined ? q.globalIndex : idx;
+        qMap.set(gIdx, q);
+        qMap.set(String(gIdx), q);
+      });
+    }
+
+    // 2. Global topic cache if topic module
+    if (readerItem.type === 'topic' && readerItem.title) {
+      const topicQs = globalTopicCache.get(readerItem.title.trim().toLowerCase());
+      if (Array.isArray(topicQs)) {
+        topicQs.forEach((q, idx) => {
+          const gIdx = q.globalIndex !== undefined ? q.globalIndex : idx;
+          qMap.set(gIdx, q);
+          qMap.set(String(gIdx), q);
+        });
+      }
+    }
+
+    // 3. Questions currently rendered in readerItem.allQuestions
+    if (Array.isArray(readerItem.allQuestions)) {
+      readerItem.allQuestions.forEach((q, idx) => {
+        const gIdx = q.globalIndex !== undefined ? q.globalIndex : idx;
+        qMap.set(gIdx, q);
+        qMap.set(String(gIdx), q);
+      });
+    }
+
+    let count = 0;
+    for (const key of choiceKeys) {
+      const selectedOpt = userChoices[key];
+      if (selectedOpt === undefined || selectedOpt === null) continue;
+
+      const q = qMap.get(key) ?? qMap.get(Number(key));
+      if (q) {
+        const correctIdx = getCorrectOptionIndex(q);
+        if (Number(selectedOpt) === Number(correctIdx)) {
+          count++;
+        }
+      }
+    }
+
+    return count;
+  }, [readerItem, userChoices, readerFullQuestions]);
+
   // ----------------------------------------------------
   // FULL SCREEN READER VIEW (100% Native 60fps/120fps Smooth Scroll in Both Directions)
   // ----------------------------------------------------
@@ -1176,6 +1394,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     const readerTypeLabel =
       readerItem.type === 'topic'
         ? 'Topic Module'
+        : readerItem.type === 'paradise' || readerItem.folderType === 'paradise'
+        ? 'Paradise Set'
         : readerItem.type === 'nmcle' || readerItem.folderType === 'nmcle'
         ? 'NMCLE Set'
         : 'Medical Book';
@@ -1183,6 +1403,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
     const readerBannerBadgeLabel =
       readerItem.type === 'topic'
         ? 'TOPIC MODULE'
+        : readerItem.type === 'paradise' || readerItem.folderType === 'paradise'
+        ? 'PARADISE MODEL SET'
         : readerItem.type === 'nmcle' || readerItem.folderType === 'nmcle'
         ? 'NMCLE EXAM SET'
         : 'MEDICAL BOOK READER';
@@ -1199,9 +1421,9 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
             style={styles.pdfBackBtn}
             onPress={handleCloseReader}
             activeOpacity={0.7}
+            accessibilityLabel="Back to Directory"
           >
-            <ArrowLeft size={18} color="#0f172a" />
-            <Text style={styles.pdfBackText}>Back</Text>
+            <ArrowLeft size={19} color="#0f172a" />
           </TouchableOpacity>
 
           <View style={{ flex: 1, marginHorizontal: 8 }}>
@@ -1213,8 +1435,17 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
             </Text>
           </View>
 
-          {/* Right Top Action Buttons Row: Answers Toggle & Reset Answers Button */}
+          {/* Right Top Action Buttons Row: Correct Counter, Answers Toggle & Reset Answers Button */}
           <View style={styles.pdfHeaderRightRow}>
+            {/* Correct Answers Counter Badge (Only displays the number of correct answers selected) */}
+            <View
+              style={styles.pdfCorrectCounterBadge}
+              accessibilityLabel={`Correct Answers: ${correctAnswersCount}`}
+            >
+              <Check size={13} color="#059669" strokeWidth={2.5} />
+              <Text style={styles.pdfCorrectCounterText}>{correctAnswersCount}</Text>
+            </View>
+
             {/* Interactive Answer Key Toggle Switch in PDF Header */}
             <TouchableOpacity
               style={[
@@ -1223,17 +1454,12 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
               ]}
               onPress={() => setReaderShowAnswers(!readerShowAnswers)}
               activeOpacity={0.8}
+              accessibilityLabel={readerShowAnswers ? "Answers: ON" : "Answers: OFF"}
             >
               {readerShowAnswers ? (
-                <>
-                  <Eye size={13} color="#059669" />
-                  <Text style={styles.pdfToggleTextActive}>Answers: ON</Text>
-                </>
+                <Eye size={17} color="#059669" />
               ) : (
-                <>
-                  <EyeOff size={13} color="#64748b" />
-                  <Text style={styles.pdfToggleTextInactive}>Answers: OFF</Text>
-                </>
+                <EyeOff size={17} color="#64748b" />
               )}
             </TouchableOpacity>
 
@@ -1253,6 +1479,13 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         <FlatList
           ref={flatListRef}
           data={readerItem.allQuestions}
+          extraData={{
+            aiExplanations,
+            loadingAiIdx,
+            expandedIndices,
+            userChoices,
+            readerShowAnswers,
+          }}
           keyExtractor={questionKeyExtractor}
           renderItem={renderQuestionItem}
           initialNumToRender={8}
@@ -1370,6 +1603,10 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
             title={`Opening ${openingTitle || 'Study Material'}...`}
             subtitle="Preparing MCQs, Answer Keys & AI Tutor..."
             icon={BookOpen}
+            onDismiss={() => {
+              setIsOpeningReader(false);
+              setLoadingCardId(null);
+            }}
           />
         )}
       </SafeAreaView>
@@ -1411,13 +1648,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
           </TouchableOpacity>
           <ChevronRight size={13} color="#64748b" style={{ marginHorizontal: 4 }} />
           <Text style={[styles.breadcrumbActiveText, isGlass && { color: '#0f172a' }]} numberOfLines={1}>
-            {selectedFolder === 'nmcle'
-              ? `NMCLE Sets (${nmcleCards.length})`
-              : selectedFolder === 'book'
-              ? `Medical Books (${bookCards.length})`
-              : selectedFolder === 'topic'
-              ? `Topic Modules (${topicCards.length})`
-              : `Custom Quizzes (${customCards.length})`}
+            {activeFolder ? `${activeFolder.name} (${activeFolder.files ? activeFolder.files.length : 0})` : 'Folder'}
           </Text>
         </View>
       )}
@@ -1429,12 +1660,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
           <TextInput
             style={[styles.searchInput, isGlass && { color: '#0f172a' }]}
             placeholder={
-              selectedFolder === 'nmcle'
-                ? 'Search 30 NMCLE sets...'
-                : selectedFolder === 'book'
-                ? 'Search 4 medical books...'
-                : selectedFolder === 'topic'
-                ? 'Search topic names...'
+              activeFolder
+                ? `Search in ${activeFolder.name}...`
                 : 'Search study sets & books...'
             }
             placeholderTextColor="#64748b"
@@ -1449,8 +1676,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
         </View>
       </View>
 
-      {/* Main Body: Either Folder Dashboard (when 'all' and no search) or Cards List */}
-      {loading ? (
+      {/* Main Body: Either Dynamic Folder Dashboard (when 'all' and no search) or Cards List */}
+      {loading && folders.length === 0 ? (
         <PageLoadingAnimation
           title="Loading Study Directory..."
           subtitle="Organizing medical books, NMCLE sets & topics..."
@@ -1468,99 +1695,72 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
             />
           }
         >
-          {/* Folder Card: NMCLE Exam Sets */}
-          <TouchableOpacity
-            style={[styles.folderOverviewCard, styles.folderCardNmcle, isGlass && styles.folderCardNmcleGlass]}
-            activeOpacity={0.85}
-            onPress={() => setSelectedFolder('nmcle')}
-          >
-            <View style={styles.folderCardHeader}>
-              <Text style={[styles.folderCardTitle, isGlass && { color: '#0f172a' }]}>NMCLE Sets</Text>
-              <View style={[styles.folderBadge, { backgroundColor: 'rgba(99, 102, 241, 0.15)' }]}>
-                <Text style={[styles.folderBadgeText, { color: '#818cf8' }]}>{nmcleCards.length} Sets</Text>
-              </View>
-            </View>
-            <Text style={[styles.folderCardDesc, isGlass && { color: '#64748b' }]}>
-              {nmcleCards.length} Official Exam & Past Model Sets ({totalNmcleQuestions > 0 ? totalNmcleQuestions.toLocaleString() : '6,000+'} MCQs)
-            </Text>
-            <View style={styles.folderCardFooter}>
-              <Text style={[styles.folderExploreText, { color: '#818cf8' }]}>
-                Open Folder ({nmcleCards.length} Sets)
-              </Text>
-              <ChevronRight size={14} color="#818cf8" />
-            </View>
-          </TouchableOpacity>
+          {folders.map((folder) => {
+            const folderColor = folder.themeColor || '#818cf8';
+            const folderBg = folder.themeBg || 'rgba(99, 102, 241, 0.15)';
+            const isNmcle = folder.id === 'nmcle' || folder.folderType === 'nmcle';
+            const isParadise = folder.id === 'paradise' || folder.folderType === 'paradise';
+            const isBook = folder.id === 'medicalsets' || folder.folderType === 'book';
+            const isTopic = folder.id === 'topic' || folder.folderType === 'topic';
+            const isCustom = folder.id === 'custom' || folder.folderType === 'custom';
 
-          {/* Folder Card: Medical Books */}
-          <TouchableOpacity
-            style={[styles.folderOverviewCard, styles.folderCardBook, isGlass && styles.folderCardBookGlass]}
-            activeOpacity={0.85}
-            onPress={() => setSelectedFolder('book')}
-          >
-            <View style={styles.folderCardHeader}>
-              <Text style={[styles.folderCardTitle, isGlass && { color: '#0f172a' }]}>Medical Books</Text>
-              <View style={[styles.folderBadge, { backgroundColor: 'rgba(2, 132, 199, 0.15)' }]}>
-                <Text style={[styles.folderBadgeText, { color: '#38bdf8' }]}>{bookCards.length} Books</Text>
-              </View>
-            </View>
-            <Text style={[styles.folderCardDesc, isGlass && { color: '#64748b' }]}>
-              Surgery, Medicine, Pediatrics, Gynae & OBS ({totalBookQuestions > 0 ? totalBookQuestions.toLocaleString() : '4 Books'} MCQs)
-            </Text>
-            <View style={styles.folderCardFooter}>
-              <Text style={[styles.folderExploreText, { color: '#38bdf8' }]}>
-                Open Folder ({bookCards.length} Books)
-              </Text>
-              <ChevronRight size={14} color="#38bdf8" />
-            </View>
-          </TouchableOpacity>
+            const cardStyle = isNmcle
+              ? styles.folderCardNmcle
+              : isParadise
+              ? styles.folderCardParadise
+              : isBook
+              ? styles.folderCardBook
+              : isTopic
+              ? styles.folderCardTopic
+              : isCustom
+              ? styles.folderCardCustom
+              : { borderColor: folderColor, backgroundColor: '#181f38' };
 
-          {/* Folder Card: Topic-Wise Study */}
-          <TouchableOpacity
-            style={[styles.folderOverviewCard, styles.folderCardTopic, isGlass && styles.folderCardTopicGlass]}
-            activeOpacity={0.85}
-            onPress={() => setSelectedFolder('topic')}
-          >
-            <View style={styles.folderCardHeader}>
-              <Text style={[styles.folderCardTitle, isGlass && { color: '#0f172a' }]}>Study by Topic</Text>
-              <View style={[styles.folderBadge, { backgroundColor: 'rgba(5, 150, 105, 0.15)' }]}>
-                <Text style={[styles.folderBadgeText, { color: '#34d399' }]}>{topicCards.length} Topics</Text>
-              </View>
-            </View>
-            <Text style={[styles.folderCardDesc, isGlass && { color: '#64748b' }]}>
-              Targeted clinical topic modules categorized across all source books & sets
-            </Text>
-            <View style={styles.folderCardFooter}>
-              <Text style={[styles.folderExploreText, { color: '#34d399' }]}>
-                Explore Topics
-              </Text>
-              <ChevronRight size={14} color="#34d399" />
-            </View>
-          </TouchableOpacity>
+            const glassStyle = isNmcle
+              ? styles.folderCardNmcleGlass
+              : isParadise
+              ? styles.folderCardParadiseGlass
+              : isBook
+              ? styles.folderCardBookGlass
+              : isTopic
+              ? styles.folderCardTopicGlass
+              : isCustom
+              ? styles.folderCardCustomGlass
+              : styles.folderOverviewCardGlass;
 
-          {/* Folder Card: Custom Sets (if any exist) */}
-          {customCards.length > 0 && (
-            <TouchableOpacity
-              style={[styles.folderOverviewCard, styles.folderCardCustom, isGlass && styles.folderCardCustomGlass]}
-              activeOpacity={0.85}
-              onPress={() => setSelectedFolder('custom')}
-            >
-              <View style={styles.folderCardHeader}>
-                <Text style={[styles.folderCardTitle, isGlass && { color: '#0f172a' }]}>Custom Tests</Text>
-                <View style={[styles.folderBadge, { backgroundColor: 'rgba(217, 119, 6, 0.15)' }]}>
-                  <Text style={[styles.folderBadgeText, { color: '#fbbf24' }]}>{customCards.length} Sets</Text>
+            return (
+              <TouchableOpacity
+                key={folder.id}
+                style={[
+                  styles.folderOverviewCard,
+                  cardStyle,
+                  isGlass && glassStyle,
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setSelectedFolder(folder.id)}
+              >
+                <View style={styles.folderCardHeader}>
+                  <Text style={[styles.folderCardTitle, isGlass && { color: '#0f172a' }]}>
+                    {folder.name}
+                  </Text>
+                  <View style={[styles.folderBadge, { backgroundColor: folderBg }]}>
+                    <Text style={[styles.folderBadgeText, { color: folderColor }]}>
+                      {folder.badge || `${folder.count} Items`}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={[styles.folderCardDesc, isGlass && { color: '#64748b' }]}>
-                Personalized practice sets created by you
-              </Text>
-              <View style={styles.folderCardFooter}>
-                <Text style={[styles.folderExploreText, { color: '#fbbf24' }]}>
-                  View Custom Sets
+                <Text style={[styles.folderCardDesc, isGlass && { color: '#64748b' }]}>
+                  {folder.description}
                 </Text>
-                <ChevronRight size={14} color="#fbbf24" />
-              </View>
-            </TouchableOpacity>
-          )}
+                <View style={styles.folderCardFooter}>
+                  <Text style={[styles.folderExploreText, { color: folderColor }]}>
+                    {isTopic ? 'Explore Topics' : `Open Folder (${folder.count} ${isBook ? 'Books' : 'Sets'})`}
+                  </Text>
+                  <ChevronRight size={14} color={folderColor} />
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       ) : filteredCards.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -1673,6 +1873,10 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
           title={`Opening ${openingTitle || 'Study Material'}...`}
           subtitle="Preparing MCQs, Answer Keys & AI Tutor..."
           icon={BookOpen}
+          onDismiss={() => {
+            setIsOpeningReader(false);
+            setLoadingCardId(null);
+          }}
         />
       )}
 
@@ -1825,6 +2029,10 @@ const styles = StyleSheet.create({
   folderCardNmcle: {
     borderColor: 'rgba(99, 102, 241, 0.4)',
     backgroundColor: '#181f38',
+  },
+  folderCardParadise: {
+    borderColor: 'rgba(236, 72, 153, 0.4)',
+    backgroundColor: '#2e1529',
   },
   folderCardBook: {
     borderColor: 'rgba(2, 132, 199, 0.4)',
@@ -2092,18 +2300,14 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   pdfBackBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#f1f5f9',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  pdfBackText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginLeft: 3,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   pdfHeaderTitle: {
     fontSize: 14.5,
@@ -2119,41 +2323,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  pdfCorrectCounterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    gap: 4,
+  },
+  pdfCorrectCounterText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#059669',
+  },
   pdfResetBtn: {
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#f1f5f9',
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#cbd5e1',
   },
   pdfToggleBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#f1f5f9',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#cbd5e1',
   },
   pdfToggleBtnActive: {
     backgroundColor: '#ecfdf5',
     borderColor: '#10b981',
-  },
-  pdfToggleTextInactive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#64748b',
-    marginLeft: 3,
-  },
-  pdfToggleTextActive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#059669',
-    marginLeft: 3,
   },
   pdfScrollPadding: {
     paddingHorizontal: 6,
@@ -2270,10 +2479,17 @@ const styles = StyleSheet.create({
   },
   pdfQuestionText: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontWeight: '600',
+    color: '#1e293b',
     lineHeight: 22,
     marginBottom: 10,
+  },
+  pdfQuestionBoldText: {
+    fontWeight: '800',
+    color: '#000000',
+  },
+  pdfOptionBoldText: {
+    fontWeight: '800',
   },
   pdfOptionsList: {
     gap: 6,
@@ -2369,81 +2585,87 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   pdfAiExpBox: {
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#f3e8ff',
-    borderWidth: 1,
-    borderColor: '#c084fc',
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#faf5ff',
+    borderWidth: 1.5,
+    borderColor: '#d8b4fe',
     overflow: 'hidden',
     width: '100%',
     flexShrink: 1,
+    shadowColor: '#a855f7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   pdfAiExpHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(168, 85, 247, 0.2)',
-    paddingBottom: 4,
+    borderBottomColor: '#ede9fe',
+    paddingBottom: 6,
   },
   pdfAiBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#7c3aed',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-    marginRight: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
   },
   pdfAiBadgeText: {
-    fontSize: 9,
+    fontSize: 9.5,
     fontWeight: '800',
     color: '#ffffff',
-    marginLeft: 3,
+    marginLeft: 4,
+    letterSpacing: 0.3,
   },
   pdfAiExpTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
-    color: '#6b21a8',
+    color: '#581c87',
   },
   pdfAiBtnRow: {
     flexDirection: 'row',
-    gap: 6,
-    marginTop: 10,
+    gap: 8,
+    marginTop: 12,
   },
   pdfAiExplainBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3e8ff',
-    paddingVertical: 9,
+    backgroundColor: '#f5f3ff',
+    paddingVertical: 10,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#a855f7',
+    borderWidth: 1.5,
+    borderColor: '#c084fc',
   },
   pdfAiExplainBtnText: {
     color: '#7c3aed',
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '700',
-    marginLeft: 4,
+    marginLeft: 5,
   },
   pdfAiChatBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4338ca',
-    paddingVertical: 9,
+    backgroundColor: '#6366f1',
+    paddingVertical: 10,
     borderRadius: 8,
   },
   pdfAiChatBtnText: {
     color: '#ffffff',
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '700',
-    marginLeft: 4,
+    marginLeft: 5,
   },
   endDocFooter: {
     alignItems: 'center',
@@ -2560,6 +2782,16 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
     borderLeftWidth: 4,
     borderLeftColor: '#6366f1',
+    shadowColor: '#64748b',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  folderCardParadiseGlass: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ec4899',
     shadowColor: '#64748b',
     shadowOpacity: 0.06,
     shadowRadius: 8,

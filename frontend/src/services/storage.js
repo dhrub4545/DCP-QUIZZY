@@ -128,3 +128,37 @@ export async function getAllStudyProgress() {
     return {};
   }
 }
+
+const STUDY_STRUCTURE_KEY = '@quizzy_study_structure_v1';
+
+/**
+ * Preserve Study Folders and File Lists locally for instant 0ms offline/startup loading
+ */
+export async function savePreservedStudyStructure(structureData) {
+  if (!structureData) return;
+  try {
+    const payload = JSON.stringify({
+      ...structureData,
+      cachedAt: new Date().toISOString(),
+    });
+    await setStorageItem(STUDY_STRUCTURE_KEY, payload);
+  } catch (err) {
+    console.warn('Error preserving study structure:', err.message);
+  }
+}
+
+/**
+ * Retrieve Preserved Study Folders and File Lists from local storage
+ */
+export async function getPreservedStudyStructure() {
+  try {
+    const jsonStr = await getStorageItem(STUDY_STRUCTURE_KEY);
+    if (jsonStr) {
+      return JSON.parse(jsonStr);
+    }
+  } catch (err) {
+    console.warn('Error reading preserved study structure:', err.message);
+  }
+  return null;
+}
+

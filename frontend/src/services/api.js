@@ -112,6 +112,11 @@ export const fetchQuizSourcesApi = async () => {
   return response.data;
 };
 
+export const fetchStudyStructureApi = async () => {
+  const response = await api.get('/quizzes/study-structure');
+  return response.data;
+};
+
 export const fetchQuestionsByTopicApi = async (topicName) => {
   const response = await api.get(`/quizzes/topic/${encodeURIComponent(topicName)}`);
   return response.data;
