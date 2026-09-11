@@ -4,14 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const THEME_STORAGE_KEY = '@app_theme_mode';
 
 const ThemeContext = createContext({
-  theme: 'dark',
-  isGlass: false,
+  theme: 'glass',
+  isGlass: true,
   toggleTheme: () => {},
   setTheme: () => {},
 });
 
 export const ThemeProvider = ({ children }) => {
-  const [theme, setThemeState] = useState('dark');
+  const [theme, setThemeState] = useState('glass');
 
   useEffect(() => {
     // Load persisted theme mode on startup
@@ -20,6 +20,8 @@ export const ThemeProvider = ({ children }) => {
         const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
         if (saved === 'glass' || saved === 'dark') {
           setThemeState(saved);
+        } else {
+          setThemeState('glass');
         }
       } catch (err) {
         console.warn('Failed to load theme preference:', err.message);

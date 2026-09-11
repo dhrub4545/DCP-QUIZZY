@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Platform } from 'react-native';
+import { View, Text, Platform, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -112,12 +112,24 @@ export default function App() {
     <GlobalErrorBoundary>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AppNavigator />
-          {isAppLoading && (
-            <AppSplashScreen onFinish={() => setIsAppLoading(false)} />
-          )}
+          <View style={styles.rootContainer}>
+            <AppNavigator />
+            {isAppLoading && (
+              <View style={StyleSheet.absoluteFill}>
+                <AppSplashScreen onFinish={() => setIsAppLoading(false)} />
+              </View>
+            )}
+          </View>
         </ThemeProvider>
       </SafeAreaProvider>
     </GlobalErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  rootContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    position: 'relative',
+  },
+});
