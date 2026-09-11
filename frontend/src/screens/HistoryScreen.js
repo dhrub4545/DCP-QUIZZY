@@ -86,7 +86,7 @@ const HistoryCardSkeleton = ({ isGlass }) => {
   );
 };
 
-function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false }) {
   const { isGlass } = useTheme();
 
   // Paginated History State (initialized with instant shared cache)
@@ -510,7 +510,10 @@ function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
   }, [isGlass]);
 
   return (
-    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
+    <SafeAreaView
+      edges={hideBottomBar ? ['top', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+      style={[styles.container, isGlass && styles.containerGlass]}
+    >
       {/* Header Bar */}
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <TouchableOpacity
@@ -581,24 +584,26 @@ function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
       )}
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar
-        activeTab="History"
-        onTabPress={(tab) => {
-          if (onTabPress) {
-            onTabPress(tab);
-          } else {
-            if (tab === 'Home') {
-              navigation.navigate('Home');
-            } else if (tab === 'Quizzes') {
-              navigation.navigate('Quizzes');
-            } else if (tab === 'Study') {
-              navigation.navigate('Study');
-            } else if (tab === 'Profile') {
-              navigation.navigate('Profile');
+      {!hideBottomBar && (
+        <BottomTabBar
+          activeTab="History"
+          onTabPress={(tab) => {
+            if (onTabPress) {
+              onTabPress(tab);
+            } else {
+              if (tab === 'Home') {
+                navigation.navigate('Home');
+              } else if (tab === 'Quizzes') {
+                navigation.navigate('Quizzes');
+              } else if (tab === 'Study') {
+                navigation.navigate('Study');
+              } else if (tab === 'Profile') {
+                navigation.navigate('Profile');
+              }
             }
-          }
-        }}
-      />
+          }}
+        />
+      )}
 
       {/* Attempt Details Review Modal with Virtualized Lazy Rendering */}
       <Modal

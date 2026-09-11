@@ -391,7 +391,7 @@ const PdfQuestionCard = memo(({
 });
 
 
-function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false, onReaderModeChange }) {
   const { isGlass } = useTheme();
 
   // Dynamic Study Directory Folders & File Lists (Initialized with instant shared cache)
@@ -418,6 +418,12 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   const [readerShowAnswers, setReaderShowAnswers] = useState(false);
   const [userChoices, setUserChoices] = useState({});
   const [readerFullQuestions, setReaderFullQuestions] = useState(null);
+
+  useEffect(() => {
+    if (onReaderModeChange) {
+      onReaderModeChange(Boolean(readerItem));
+    }
+  }, [readerItem, onReaderModeChange]);
   
   // Bookmark & Navigation Index
   const [initialBookmarkIndex, setInitialBookmarkIndex] = useState(0);
@@ -1617,7 +1623,10 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   // DIRECTORY MAIN VIEW (With Saved Bookmarks & Progress Badges)
   // ----------------------------------------------------
   return (
-    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
+    <SafeAreaView
+      edges={hideBottomBar ? ['top', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+      style={[styles.container, isGlass && styles.containerGlass]}
+    >
       {/* Header */}
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
@@ -1881,7 +1890,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       )}
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar activeTab="Study" onTabPress={handleTabPress} />
+      {!hideBottomBar && <BottomTabBar activeTab="Study" onTabPress={handleTabPress} />}
     </SafeAreaView>
   );
 }

@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Home, BookOpen, Clock, User, GraduationCap } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
 /**
@@ -9,6 +10,8 @@ import { useTheme } from '../context/ThemeContext';
  */
 function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
   const { isGlass } = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets?.bottom ? Math.max(insets.bottom, 4) : 0;
 
   const handleStudyPress = () => {
     if (onStudyPress) {
@@ -19,7 +22,13 @@ function BottomTabBar({ activeTab, onTabPress, onStudyPress, onAddQuizPress }) {
   };
 
   return (
-    <View style={[styles.footerContainer, isGlass && styles.footerContainerGlass]}>
+    <View
+      style={[
+        styles.footerContainer,
+        isGlass && styles.footerContainerGlass,
+        bottomInset > 0 && { paddingBottom: bottomInset, height: 60 + bottomInset },
+      ]}
+    >
       {/* Home Tab */}
       <TouchableOpacity
         style={styles.tabItem}

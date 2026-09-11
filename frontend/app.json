@@ -2,7 +2,7 @@
   "expo": {
     "name": "QUIZZY",
     "slug": "quizzy",
-    "version": "2.1.0",
+    "version": "2.1.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0f172a",
@@ -17,7 +17,7 @@
       "favicon": "./assets/icon.png"
     },
     "android": {
-      "versionCode": 3,
+      "versionCode": 4,
       "backgroundColor": "#0f172a",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",

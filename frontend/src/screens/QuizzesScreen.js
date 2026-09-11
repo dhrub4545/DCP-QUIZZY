@@ -39,7 +39,7 @@ import BottomTabBar from '../components/BottomTabBar';
 import PageLoadingAnimation from '../components/PageLoadingAnimation';
 import { getCachedQuizzes, setCachedQuizzes } from '../services/appStateCache';
 
-function QuizzesScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+function QuizzesScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false }) {
   const { isGlass } = useTheme();
   const [quizzes, setQuizzes] = useState(getCachedQuizzes() || []);
   const [loading, setLoading] = useState(!getCachedQuizzes());
@@ -230,7 +230,10 @@ function QuizzesScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
   };
 
   return (
-    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
+    <SafeAreaView
+      edges={hideBottomBar ? ['top', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+      style={[styles.container, isGlass && styles.containerGlass]}
+    >
       {/* Header Bar */}
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
@@ -552,7 +555,7 @@ function QuizzesScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
       )}
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar activeTab="Quizzes" onTabPress={handleTabPress} />
+      {!hideBottomBar && <BottomTabBar activeTab="Quizzes" onTabPress={handleTabPress} />}
 
       {/* Manage Questions Modal */}
       <ManageQuizModal

@@ -34,7 +34,7 @@ import {
   setCachedHistory,
 } from '../services/appStateCache';
 
-function ProfileScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+function ProfileScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false }) {
   const { isGlass } = useTheme();
   
   const [profileUser, setProfileUser] = useState(
@@ -184,7 +184,10 @@ function ProfileScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
   };
 
   return (
-    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
+    <SafeAreaView
+      edges={hideBottomBar ? ['top', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+      style={[styles.container, isGlass && styles.containerGlass]}
+    >
       <ScrollView style={styles.scrollBody} showsVerticalScrollIndicator={false}>
         {/* Profile User Header Card */}
         <View style={[styles.userHeaderCard, isGlass && styles.userHeaderCardGlass]}>
@@ -328,10 +331,12 @@ function ProfileScreen({ navigation, route, onTabPress, isActiveTab, onReady }) 
       </ScrollView>
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar
-        activeTab="Profile"
-        onTabPress={handleTabPress}
-      />
+      {!hideBottomBar && (
+        <BottomTabBar
+          activeTab="Profile"
+          onTabPress={handleTabPress}
+        />
+      )}
     </SafeAreaView>
   );
 }

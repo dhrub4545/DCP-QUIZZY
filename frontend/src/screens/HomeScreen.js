@@ -45,7 +45,7 @@ import {
   setCachedUserProfile,
 } from '../services/appStateCache';
 
-function HomeScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
+function HomeScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false }) {
   const { theme, isGlass, toggleTheme } = useTheme();
   const [quizzes, setQuizzes] = useState(getCachedQuizzes() || []);
   const [historyList, setHistoryList] = useState(getCachedHistory() || []);
@@ -224,7 +224,10 @@ function HomeScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
   }, [quizzes, historyList]);
 
   return (
-    <SafeAreaView style={[styles.container, isGlass && styles.containerGlass]}>
+    <SafeAreaView
+      edges={hideBottomBar ? ['top', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+      style={[styles.container, isGlass && styles.containerGlass]}
+    >
       {/* Header Bar */}
       <View style={[styles.header, isGlass && styles.headerGlass]}>
         <View style={{ flex: 1 }}>
@@ -492,10 +495,12 @@ function HomeScreen({ navigation, route, onTabPress, isActiveTab, onReady }) {
       </ScrollView>
 
       {/* Fixed Bottom Navigation Footer Bar */}
-      <BottomTabBar
-        activeTab={activeTab}
-        onTabPress={handleTabPress}
-      />
+      {!hideBottomBar && (
+        <BottomTabBar
+          activeTab={activeTab}
+          onTabPress={handleTabPress}
+        />
+      )}
 
       {/* Modal: Create New Quiz */}
       <Modal
