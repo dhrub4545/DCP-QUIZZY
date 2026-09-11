@@ -5,13 +5,6 @@ import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
-import * as SplashScreen from 'expo-splash-screen';
-import AppSplashScreen from './src/components/AppSplashScreen';
-
-// Keep native splash active until our React theme-matched animated splash is ready
-try {
-  SplashScreen.preventAutoHideAsync().catch(() => {});
-} catch (e) {}
 
 import LoginScreen from './src/screens/LoginScreen';
 import MainScreen from './src/screens/MainScreen';
@@ -106,30 +99,13 @@ function AppNavigator() {
 }
 
 export default function App() {
-  const [isAppLoading, setIsAppLoading] = useState(true);
-
   return (
     <GlobalErrorBoundary>
       <SafeAreaProvider>
         <ThemeProvider>
-          <View style={styles.rootContainer}>
-            <AppNavigator />
-            {isAppLoading && (
-              <View style={StyleSheet.absoluteFill}>
-                <AppSplashScreen onFinish={() => setIsAppLoading(false)} />
-              </View>
-            )}
-          </View>
+          <AppNavigator />
         </ThemeProvider>
       </SafeAreaProvider>
     </GlobalErrorBoundary>
   );
 }
-
-const styles = StyleSheet.create({
-  rootContainer: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    position: 'relative',
-  },
-});
