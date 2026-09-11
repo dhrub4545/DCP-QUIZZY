@@ -17,7 +17,7 @@
       "favicon": "./assets/icon.png"
     },
     "android": {
-      "versionCode": 8,
+      "versionCode": 9,
       "backgroundColor": "#ffffff",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
@@ -41,7 +41,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#ffffff",
+          "image": "./assets/blank_white.png",
+          "imageWidth": 1
         }
       ]
     ]
