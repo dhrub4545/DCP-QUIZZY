@@ -32,5 +32,10 @@
   "devDependencies": {
     "@babel/core": "^7.25.0"
   },
+  "overrides": {
+    "lucide-react-native": {
+      "react": "$react"
+    }
+  },
   "private": true
 }
