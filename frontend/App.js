@@ -1,10 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import * as SplashScreen from 'expo-splash-screen';
+import AppSplashScreen from './src/components/AppSplashScreen';
+
+// Keep native splash active until our React theme-matched animated splash is ready
+try {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+} catch (e) {}
 
 import LoginScreen from './src/screens/LoginScreen';
 import MainScreen from './src/screens/MainScreen';
@@ -99,11 +106,16 @@ function AppNavigator() {
 }
 
 export default function App() {
+  const [isAppLoading, setIsAppLoading] = useState(true);
+
   return (
     <GlobalErrorBoundary>
       <SafeAreaProvider>
         <ThemeProvider>
           <AppNavigator />
+          {isAppLoading && (
+            <AppSplashScreen onFinish={() => setIsAppLoading(false)} />
+          )}
         </ThemeProvider>
       </SafeAreaProvider>
     </GlobalErrorBoundary>
