@@ -36,11 +36,6 @@
       }
     },
     "owner": "dhrub4545",
-    "splash": {
-      "image": "./assets/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f172a"
-    },
     "plugins": [
       "expo-status-bar"
     ]
