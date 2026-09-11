@@ -391,6 +391,207 @@ const PdfQuestionCard = memo(({
 });
 
 
+// Fallback generator for Study Directory structure from standard quizzes list
+function buildStudyStructureFromQuizzes(quizList) {
+  if (!Array.isArray(quizList) || quizList.length === 0) return null;
+
+  const nmcleFiles = [];
+  const paradiseFiles = [];
+  const medicalFiles = [];
+  const customFiles = [];
+  const dynamicFoldersMap = {};
+  const topicMap = {};
+
+  const STANDARD_MEDICAL_SUBJECTS = new Set([
+    'surgery',
+    'medicine',
+    'pediatrics',
+    'gynae & obs',
+    'gynae',
+    'obstetrics',
+    'medical',
+    'medical books',
+    'medical sets',
+  ]);
+
+  const DYNAMIC_THEME_COLORS = [
+    { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' },
+    { color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' },
+    { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+    { color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' },
+    { color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)' },
+    { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.15)' },
+  ];
+
+  quizList.forEach((q) => {
+    const titleLower = (q.title || '').toLowerCase();
+    const subjectLower = (q.subject || '').toLowerCase();
+
+    const isCustomFlag = Boolean(
+      q.isCustom === true ||
+      q.creator === 'user' ||
+      titleLower.includes('custom') ||
+      titleLower.includes('combined')
+    );
+
+    if (Array.isArray(q.topics)) {
+      q.topics.forEach((top) => {
+        const trimmed = (top || '').trim();
+        if (trimmed) {
+          topicMap[trimmed] = (topicMap[trimmed] || 0) + 1;
+        }
+      });
+    }
+
+    const fileItem = {
+      id: String(q._id || q.id),
+      _id: String(q._id || q.id),
+      title: q.title,
+      subject: q.subject || 'General',
+      questionCount: q.questionCount || (Array.isArray(q.questions) ? q.questions.length : 0) || 180,
+      folder: q.folder || null,
+      isCustom: isCustomFlag,
+      updatedAt: q.updatedAt || q.createdAt,
+    };
+
+    if (isCustomFlag) {
+      fileItem.folderType = 'custom';
+      customFiles.push(fileItem);
+    } else if (subjectLower.includes('paradise') || titleLower.includes('paradise')) {
+      fileItem.folderType = 'paradise';
+      paradiseFiles.push(fileItem);
+    } else if (subjectLower.includes('nmcle') || titleLower.includes('nmcle')) {
+      fileItem.folderType = 'nmcle';
+      nmcleFiles.push(fileItem);
+    } else if (STANDARD_MEDICAL_SUBJECTS.has(subjectLower)) {
+      fileItem.folderType = 'book';
+      medicalFiles.push(fileItem);
+    } else if (q.subject && q.subject.trim() && subjectLower !== 'general') {
+      const customSubjectFolder = q.subject.trim();
+      fileItem.folderType = 'dynamic';
+      if (!dynamicFoldersMap[customSubjectFolder]) dynamicFoldersMap[customSubjectFolder] = [];
+      dynamicFoldersMap[customSubjectFolder].push(fileItem);
+    } else {
+      fileItem.folderType = 'book';
+      medicalFiles.push(fileItem);
+    }
+  });
+
+  const topicFiles = Object.keys(topicMap)
+    .sort((a, b) => a.localeCompare(b))
+    .map((topicName, idx) => ({
+      id: `topic_${idx}`,
+      title: topicName,
+      bookCount: topicMap[topicName],
+      folderType: 'topic',
+    }));
+
+  const totalNmcleQuestions = nmcleFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+  const totalParadiseQuestions = paradiseFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+  const totalMedicalQuestions = medicalFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+  const totalCustomQuestions = customFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+
+  const medicalSubjects = Array.from(new Set(medicalFiles.map(f => f.subject).filter(Boolean)));
+  const medicalDesc = medicalSubjects.length > 0
+    ? `${medicalSubjects.slice(0, 4).join(', ')}${medicalSubjects.length > 4 ? ' & more' : ''} (${medicalFiles.length} Books, ${totalMedicalQuestions.toLocaleString()} MCQs)`
+    : `Comprehensive clinical question banks (${medicalFiles.length} Books)`;
+
+  const folders = [
+    {
+      id: 'nmcle',
+      name: 'NMCLE Sets',
+      badge: `${nmcleFiles.length} Sets`,
+      description: `${nmcleFiles.length} Official Exam & Past Papers (${totalNmcleQuestions > 0 ? totalNmcleQuestions.toLocaleString() : '5,400+'} MCQs)`,
+      count: nmcleFiles.length,
+      totalQuestions: totalNmcleQuestions,
+      folderType: 'nmcle',
+      themeColor: '#818cf8',
+      themeBg: 'rgba(99, 102, 241, 0.15)',
+      files: nmcleFiles,
+    },
+    {
+      id: 'paradise',
+      name: 'Paradise Sets',
+      badge: `${paradiseFiles.length} Sets`,
+      description: `${paradiseFiles.length} High-Yield Model Exam Sets (${totalParadiseQuestions > 0 ? totalParadiseQuestions.toLocaleString() : '3,700+'} MCQs)`,
+      count: paradiseFiles.length,
+      totalQuestions: totalParadiseQuestions,
+      folderType: 'paradise',
+      themeColor: '#ec4899',
+      themeBg: 'rgba(236, 72, 153, 0.15)',
+      files: paradiseFiles,
+    },
+    {
+      id: 'medicalsets',
+      name: 'Medical Sets',
+      badge: `${medicalFiles.length} Books`,
+      description: medicalDesc,
+      count: medicalFiles.length,
+      totalQuestions: totalMedicalQuestions,
+      folderType: 'book',
+      themeColor: '#38bdf8',
+      themeBg: 'rgba(2, 132, 199, 0.15)',
+      files: medicalFiles,
+    },
+  ];
+
+  Object.keys(dynamicFoldersMap).forEach((fName, idx) => {
+    const fFiles = dynamicFoldersMap[fName];
+    const fTotalQ = fFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+    const safeId = 'folder_' + fName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const theme = DYNAMIC_THEME_COLORS[idx % DYNAMIC_THEME_COLORS.length];
+
+    folders.push({
+      id: safeId,
+      name: fName.endsWith('Sets') || fName.endsWith('sets') ? fName : `${fName} Sets`,
+      badge: `${fFiles.length} Sets`,
+      description: `${fFiles.length} study sets (${fTotalQ > 0 ? fTotalQ.toLocaleString() : 'Practice'} MCQs)`,
+      count: fFiles.length,
+      totalQuestions: fTotalQ,
+      folderType: 'dynamic',
+      themeColor: theme.color,
+      themeBg: theme.bg,
+      files: fFiles,
+    });
+  });
+
+  if (topicFiles.length > 0) {
+    folders.push({
+      id: 'topic',
+      name: 'Study by Topic',
+      badge: `${topicFiles.length} Topics`,
+      description: 'Targeted clinical topic modules categorized across all source books & sets',
+      count: topicFiles.length,
+      totalQuestions: 0,
+      folderType: 'topic',
+      themeColor: '#34d399',
+      themeBg: 'rgba(5, 150, 105, 0.15)',
+      files: topicFiles,
+    });
+  }
+
+  if (customFiles.length > 0) {
+    folders.push({
+      id: 'custom',
+      name: 'Custom Sets',
+      badge: `${customFiles.length} Sets`,
+      description: `Personalized practice sets created by you (${totalCustomQuestions.toLocaleString()} MCQs)`,
+      count: customFiles.length,
+      totalQuestions: totalCustomQuestions,
+      folderType: 'custom',
+      themeColor: '#fbbf24',
+      themeBg: 'rgba(217, 119, 6, 0.15)',
+      files: customFiles,
+    });
+  }
+
+  return {
+    hash: 'fallback_' + quizList.length,
+    folders,
+  };
+}
+
+
 function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hideBottomBar = false, onReaderModeChange }) {
   const { isGlass } = useTheme();
 
@@ -447,6 +648,17 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
   const foldersHashRef = useRef(foldersHash);
 
   const studyStateRef = useRef({
+    chatModalVisible: false,
+    readerItem: null,
+    selectedFolder: 'all',
+    searchQuery: '',
+    lastViewedIndex: 0,
+    userChoices: {},
+    readerShowAnswers: false,
+    foldersHash: null,
+  });
+
+  Object.assign(studyStateRef.current, {
     chatModalVisible,
     readerItem,
     selectedFolder,
@@ -456,17 +668,6 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
     readerShowAnswers,
     foldersHash,
   });
-
-  studyStateRef.current = {
-    chatModalVisible,
-    readerItem,
-    selectedFolder,
-    searchQuery,
-    lastViewedIndex,
-    userChoices,
-    readerShowAnswers,
-    foldersHash,
-  };
 
   useEffect(() => {
     foldersHashRef.current = foldersHash;
@@ -504,7 +705,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
       }
 
       // Fetch DB study structure (lightweight dynamic manifest) & stored progress in parallel
-      const [structureData, storedProgress] = await Promise.all([
+      let [structureData, storedProgress] = await Promise.all([
         fetchStudyStructureApi().catch(err => {
           console.warn('Study structure API fallback:', err.message);
           return null;
@@ -512,10 +713,29 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
         getAllStudyProgress().catch(() => ({})),
       ]);
 
-      if (structureData && Array.isArray(structureData.folders)) {
+      // Fallback: if structureData is null or missing folders, construct from quizzes API or cache
+      if (!structureData || !Array.isArray(structureData.folders) || structureData.folders.length === 0) {
+        try {
+          let quizList = getCachedQuizzes();
+          if (!quizList || !quizList.length) {
+            const qRes = await fetchQuizzes().catch(() => null);
+            if (qRes && Array.isArray(qRes.quizzes) && qRes.quizzes.length > 0) {
+              quizList = qRes.quizzes;
+              setCachedQuizzes(quizList);
+            }
+          }
+          if (Array.isArray(quizList) && quizList.length > 0) {
+            structureData = buildStudyStructureFromQuizzes(quizList);
+          }
+        } catch (fbErr) {
+          console.warn('Fallback building study structure failed:', fbErr.message);
+        }
+      }
+
+      if (structureData && Array.isArray(structureData.folders) && structureData.folders.length > 0) {
         const currentHash = foldersHashRef.current;
-        // Check if DB updated: if hash differs or not yet cached, update local preservation and screen state
-        if (!currentHash || structureData.hash !== currentHash) {
+        // Check if DB updated: if hash differs, not yet cached, or current folders empty
+        if (!currentHash || structureData.hash !== currentHash || folders.length === 0) {
           setCachedStudyStructure(structureData);
           setFolders(structureData.folders);
           setFoldersHash(structureData.hash);
@@ -549,6 +769,8 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
         setFolders(cached.folders);
         setFoldersHash(cached.hash);
         setLoading(false);
+      } else {
+        loadDirectoryData();
       }
       if (cachedProgress) {
         setStudyProgressMap(cachedProgress);
@@ -1693,18 +1915,41 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
           icon={GraduationCap}
         />
       ) : selectedFolder === 'all' && !searchQuery.trim() ? (
-        <ScrollView
-          contentContainerStyle={styles.folderDashboardContainer}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              colors={['#6366f1']}
-            />
-          }
-        >
-          {folders.map((folder) => {
+        folders.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <BookOpen size={48} color={isGlass ? '#94a3b8' : '#475569'} />
+            <Text style={[styles.emptyTitle, isGlass && { color: '#0f172a' }]}>
+              {loading ? 'Loading Study Directory...' : 'No Study Sets Found'}
+            </Text>
+            <Text style={[styles.emptySubtitle, isGlass && { color: '#64748b' }]}>
+              {loading
+                ? 'Preparing medical books, NMCLE sets & topics...'
+                : 'Unable to load study materials. Tap below to reload.'}
+            </Text>
+            {!loading && (
+              <TouchableOpacity
+                style={[styles.reloadBtn, isGlass && styles.reloadBtnGlass]}
+                onPress={() => loadDirectoryData(true)}
+                activeOpacity={0.8}
+              >
+                <RotateCcw size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.reloadBtnText}>Reload Study Directory</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.folderDashboardContainer}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={['#6366f1']}
+              />
+            }
+          >
+            {folders.map((folder) => {
             const folderColor = folder.themeColor || '#818cf8';
             const folderBg = folder.themeBg || 'rgba(99, 102, 241, 0.15)';
             const isNmcle = folder.id === 'nmcle' || folder.folderType === 'nmcle';
@@ -1771,6 +2016,7 @@ function StudyScreen({ navigation, route, onTabPress, isActiveTab, onReady, hide
             );
           })}
         </ScrollView>
+        )
       ) : filteredCards.length === 0 ? (
         <View style={styles.emptyContainer}>
           <BookOpen size={48} color={isGlass ? '#94a3b8' : '#475569'} />
@@ -2847,6 +3093,23 @@ const styles = StyleSheet.create({
   cardProgressContainerGlass: {
     backgroundColor: '#f8fafc',
     borderColor: '#e2e8f0',
+  },
+  reloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 14,
+  },
+  reloadBtnGlass: {
+    backgroundColor: '#4f46e5',
+  },
+  reloadBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 
