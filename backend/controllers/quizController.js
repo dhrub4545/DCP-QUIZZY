@@ -661,6 +661,269 @@ const generateCustomQuiz = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Get Dynamic Study Directory Structure (Folders, File Lists & Hash from DB)
+ * @route   GET /api/quizzes/study-structure
+ */
+const crypto = require('crypto');
+
+const getStudyStructure = async (req, res) => {
+  try {
+    const currentUserId = req.user?.id || req.user?._id || req.query.userId || 'guest';
+
+    // Fetch lightweight quiz metadata (excluding heavy questions array)
+    const quizzes = await Quiz.find(
+      {},
+      'title subject folder description questionCount topics isCustom creator userId createdAt updatedAt'
+    )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Separate quizzes into dynamic folder buckets
+    const nmcleFiles = [];
+    const paradiseFiles = [];
+    const medicalFiles = [];
+    const customFiles = [];
+    const dynamicFoldersMap = {}; // for any arbitrary custom folders in DB
+
+    const topicMap = {}; // topicName -> count of quizzes
+
+    let latestTimestamp = 0;
+
+    const STANDARD_MEDICAL_SUBJECTS = new Set([
+      'surgery',
+      'medicine',
+      'pediatrics',
+      'gynae & obs',
+      'gynae',
+      'obstetrics',
+      'medical',
+      'medical books',
+      'medical sets'
+    ]);
+
+    const DYNAMIC_THEME_COLORS = [
+      { color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' }, // Purple
+      { color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' },   // Cyan
+      { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },  // Amber
+      { color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' },  // Emerald
+      { color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)' },   // Rose
+      { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.15)' },  // Indigo
+    ];
+
+    quizzes.forEach((q) => {
+      const qTime = new Date(q.updatedAt || q.createdAt || 0).getTime();
+      if (qTime > latestTimestamp) latestTimestamp = qTime;
+
+      const titleLower = (q.title || '').toLowerCase();
+      const subjectLower = (q.subject || '').toLowerCase();
+      const folderLower = (q.folder || '').toLowerCase();
+
+      const isCustomFlag = Boolean(
+        q.isCustom === true ||
+        q.creator === 'user' ||
+        titleLower.includes('custom') ||
+        titleLower.includes('combined')
+      );
+
+      // Visibility filter for custom quizzes
+      if (isCustomFlag) {
+        if (q.userId && q.userId !== 'guest' && q.userId !== currentUserId) {
+          return;
+        }
+      }
+
+      // Collect topics for Study by Topic
+      if (Array.isArray(q.topics)) {
+        q.topics.forEach((top) => {
+          const trimmed = (top || '').trim();
+          if (trimmed) {
+            topicMap[trimmed] = (topicMap[trimmed] || 0) + 1;
+          }
+        });
+      }
+
+      const fileItem = {
+        id: String(q._id),
+        _id: String(q._id),
+        title: q.title,
+        subject: q.subject || 'General',
+        questionCount: q.questionCount || 0,
+        folder: q.folder || null,
+        isCustom: isCustomFlag,
+        updatedAt: q.updatedAt || q.createdAt,
+      };
+
+      // Folder categorization logic (Supports explicit folder property OR distinct subject)
+      if (q.folder && q.folder.trim()) {
+        const fKey = q.folder.trim();
+        const fKeyLower = fKey.toLowerCase();
+        if (fKeyLower.includes('paradise')) {
+          fileItem.folderType = 'paradise';
+          paradiseFiles.push(fileItem);
+        } else if (fKeyLower === 'nmcle' || fKeyLower.includes('nmcle')) {
+          fileItem.folderType = 'nmcle';
+          nmcleFiles.push(fileItem);
+        } else if (fKeyLower === 'medical' || fKeyLower.includes('medical')) {
+          fileItem.folderType = 'book';
+          medicalFiles.push(fileItem);
+        } else {
+          fileItem.folderType = 'dynamic';
+          if (!dynamicFoldersMap[fKey]) dynamicFoldersMap[fKey] = [];
+          dynamicFoldersMap[fKey].push(fileItem);
+        }
+      } else if (isCustomFlag) {
+        fileItem.folderType = 'custom';
+        customFiles.push(fileItem);
+      } else if (subjectLower.includes('paradise') || titleLower.includes('paradise')) {
+        fileItem.folderType = 'paradise';
+        paradiseFiles.push(fileItem);
+      } else if (subjectLower.includes('nmcle') || titleLower.includes('nmcle')) {
+        fileItem.folderType = 'nmcle';
+        nmcleFiles.push(fileItem);
+      } else if (STANDARD_MEDICAL_SUBJECTS.has(subjectLower)) {
+        fileItem.folderType = 'book';
+        medicalFiles.push(fileItem);
+      } else if (q.subject && q.subject.trim() && subjectLower !== 'general') {
+        // Any newly added subject (e.g. Science, Pharmacology, Anatomy, Dental, etc.) automatically becomes its own folder
+        const customSubjectFolder = q.subject.trim();
+        fileItem.folderType = 'dynamic';
+        if (!dynamicFoldersMap[customSubjectFolder]) dynamicFoldersMap[customSubjectFolder] = [];
+        dynamicFoldersMap[customSubjectFolder].push(fileItem);
+      } else {
+        // General medical books fallback
+        fileItem.folderType = 'book';
+        medicalFiles.push(fileItem);
+      }
+    });
+
+    // Build Topic items array
+    const topicFiles = Object.keys(topicMap)
+      .sort((a, b) => a.localeCompare(b))
+      .map((topicName, idx) => ({
+        id: `topic_${idx}`,
+        title: topicName,
+        bookCount: topicMap[topicName],
+        folderType: 'topic',
+      }));
+
+    const totalNmcleQuestions = nmcleFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+    const totalParadiseQuestions = paradiseFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+    const totalMedicalQuestions = medicalFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+    const totalCustomQuestions = customFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+
+    // Build medical subjects summary
+    const medicalSubjects = Array.from(new Set(medicalFiles.map(f => f.subject).filter(Boolean)));
+    const medicalDesc = medicalSubjects.length > 0
+      ? `${medicalSubjects.slice(0, 4).join(', ')}${medicalSubjects.length > 4 ? ' & more' : ''} (${medicalFiles.length} Books, ${totalMedicalQuestions.toLocaleString()} MCQs)`
+      : `Comprehensive clinical question banks (${medicalFiles.length} Books)`;
+
+    const folders = [
+      {
+        id: 'nmcle',
+        name: 'NMCLE Sets',
+        badge: `${nmcleFiles.length} Sets`,
+        description: `${nmcleFiles.length} Official Exam & Past Papers (${totalNmcleQuestions > 0 ? totalNmcleQuestions.toLocaleString() : '5,400+'} MCQs)`,
+        count: nmcleFiles.length,
+        totalQuestions: totalNmcleQuestions,
+        folderType: 'nmcle',
+        themeColor: '#818cf8',
+        themeBg: 'rgba(99, 102, 241, 0.15)',
+        files: nmcleFiles,
+      },
+      {
+        id: 'paradise',
+        name: 'Paradise Sets',
+        badge: `${paradiseFiles.length} Sets`,
+        description: `${paradiseFiles.length} High-Yield Model Exam Sets (${totalParadiseQuestions > 0 ? totalParadiseQuestions.toLocaleString() : '3,700+'} MCQs)`,
+        count: paradiseFiles.length,
+        totalQuestions: totalParadiseQuestions,
+        folderType: 'paradise',
+        themeColor: '#ec4899',
+        themeBg: 'rgba(236, 72, 153, 0.15)',
+        files: paradiseFiles,
+      },
+      {
+        id: 'medicalsets',
+        name: 'Medical Sets',
+        badge: `${medicalFiles.length} Books`,
+        description: medicalDesc,
+        count: medicalFiles.length,
+        totalQuestions: totalMedicalQuestions,
+        folderType: 'book',
+        themeColor: '#38bdf8',
+        themeBg: 'rgba(2, 132, 199, 0.15)',
+        files: medicalFiles,
+      }
+    ];
+
+    // Add any dynamic folders specified in DB (e.g. Science, Pharmacology, etc.)
+    Object.keys(dynamicFoldersMap).forEach((fName, idx) => {
+      const fFiles = dynamicFoldersMap[fName];
+      const fTotalQ = fFiles.reduce((sum, f) => sum + (f.questionCount || 0), 0);
+      const safeId = 'folder_' + fName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const theme = DYNAMIC_THEME_COLORS[idx % DYNAMIC_THEME_COLORS.length];
+
+      folders.push({
+        id: safeId,
+        name: fName.endsWith('Sets') || fName.endsWith('sets') ? fName : `${fName} Sets`,
+        badge: `${fFiles.length} Sets`,
+        description: `${fFiles.length} study sets (${fTotalQ > 0 ? fTotalQ.toLocaleString() : 'Practice'} MCQs)`,
+        count: fFiles.length,
+        totalQuestions: fTotalQ,
+        folderType: 'dynamic',
+        themeColor: theme.color,
+        themeBg: theme.bg,
+        files: fFiles,
+      });
+    });
+
+    // Add Study by Topic
+    folders.push({
+      id: 'topic',
+      name: 'Study by Topic',
+      badge: `${topicFiles.length} Topics`,
+      description: 'Targeted clinical topic modules categorized across all source books & sets',
+      count: topicFiles.length,
+      totalQuestions: 0,
+      folderType: 'topic',
+      themeColor: '#34d399',
+      themeBg: 'rgba(5, 150, 105, 0.15)',
+      files: topicFiles,
+    });
+
+    // Add Custom Sets folder if user has any custom quizzes
+    if (customFiles.length > 0) {
+      folders.push({
+        id: 'custom',
+        name: 'Custom Sets',
+        badge: `${customFiles.length} Sets`,
+        description: `Personalized practice sets created by you (${totalCustomQuestions.toLocaleString()} MCQs)`,
+        count: customFiles.length,
+        totalQuestions: totalCustomQuestions,
+        folderType: 'custom',
+        themeColor: '#fbbf24',
+        themeBg: 'rgba(217, 119, 6, 0.15)',
+        files: customFiles,
+      });
+    }
+
+    // Compute deterministic change-detection hash
+    const hashData = folders.map(f => `${f.id}:${f.count}:${f.totalQuestions}:${f.files.length}`).join('|') + `:${latestTimestamp}`;
+    const hash = crypto.createHash('md5').update(hashData).digest('hex');
+
+    return res.status(200).json({
+      success: true,
+      hash,
+      lastUpdated: latestTimestamp,
+      folders,
+    });
+  } catch (error) {
+    console.error('Error fetching study structure:', error);
+    return res.status(500).json({ success: false, message: 'Server error fetching study directory structure' });
+  }
+};
+
 module.exports = {
   createQuiz,
   getAllQuizzes,
@@ -672,6 +935,7 @@ module.exports = {
   deleteQuestionFromQuiz,
   getAvailableSources,
   generateCustomQuiz,
-  getQuestionsByTopic
+  getQuestionsByTopic,
+  getStudyStructure
 };
 

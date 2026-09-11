@@ -114,11 +114,16 @@ function getCacheKey(questionText, correctAnswerLetter) {
 /**
  * Generate comprehensive AI explanation for a single question (With caching)
  */
-async function generateAiExplanation({ questionText, options, correctAnswerLetter, explanation }) {
+async function generateAiExplanation({ questionText, options, correctAnswerLetter, explanation, forceRefresh = false }) {
   const cacheKey = getCacheKey(questionText, correctAnswerLetter);
 
-  if (explanationCache.has(cacheKey)) {
-    return explanationCache.get(cacheKey);
+  if (!forceRefresh && explanationCache.has(cacheKey)) {
+    const cached = explanationCache.get(cacheKey);
+    // Invalidate any stale cache that contained crude ASCII diagrams or broken formatting
+    if (typeof cached === 'string' && !cached.includes('[UPPER RIB]') && !cached.includes('| <--')) {
+      return cached;
+    }
+    explanationCache.delete(cacheKey);
   }
 
   const prompt = `EXPERT ACADEMIC & MEDICAL TUTOR EXPLANATION GENERATOR:
@@ -136,8 +141,14 @@ INSTRUCTIONS:
 Provide an in-depth, highly educational explanation for this question formatted in clean Markdown. Include:
 1. 💡 **Core Concept & Clinical Rationale**: Clear, step-by-step breakdown of the underlying medical/academic principle.
 2. ✅ **Why Option ${correctAnswerLetter || 'A'} is Correct**: Detailed explanation of why the correct answer choice is right.
-3. ❌ **Why Other Options are Incorrect**: Concise 1-sentence reasons why each of the distractor options is incorrect.
-4. 🧠 **Memory Mnemonic / Key Takeaway**: A quick memory trick or bullet point summary to remember this for future exams.`;
+3. ❌ **Why Other Options are Incorrect**: Concise reasons why each of the distractor options is incorrect.
+4. 🧠 **Memory Mnemonic / Key Takeaway**: A quick memory trick or bullet point summary to remember this for future exams.
+
+CRITICAL FORMATTING RULES:
+- DO NOT draw ASCII art, text schematics, box-drawing characters, or pseudo-drawings (e.g. do NOT use "---", "===", "| <--", "[UPPER RIB]", "[ ! ]").
+- Instead of ASCII diagrams, use structured bullet points, numbered steps, or markdown tables for anatomical layers, pathways, and clinical relationships.
+- Use bold keywords for anatomical landmarks and clinical terms (e.g. **Upper border of lower rib**, **Neurovascular bundle (VAN)**).
+- Keep formatting clean, elegant, and standard markdown for effortless mobile reading.`;
 
   const systemInstruction = 'You are an elite medical professor and exam prep tutor. Provide clear, encouraging, structured explanations.';
   const result = await callGeminiWithFallback(prompt, systemInstruction);

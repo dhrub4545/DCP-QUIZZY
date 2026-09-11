@@ -26,6 +26,7 @@ const QuizSchema = new mongoose.Schema({
   questionCount: { type: Number, default: 0 },
   questions: [QuestionSchema],
   topics: [{ type: String }],
+  folder: { type: String, default: null, trim: true },
   isCustom: { type: Boolean, default: false },
   creator: { type: String, default: 'admin' },
   userId: { type: String, default: null },

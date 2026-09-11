@@ -11,10 +11,12 @@ const {
   deleteQuestionFromQuiz,
   getAvailableSources,
   generateCustomQuiz,
-  getQuestionsByTopic
+  getQuestionsByTopic,
+  getStudyStructure
 } = require('../controllers/quizController');
 
 // Sources, Custom Quiz Generation & Topic-Wise Extraction (Must precede parametric :id routes)
+router.get('/study-structure', getStudyStructure);
 router.get('/sources', getAvailableSources);
 router.get('/topic/:topicName', getQuestionsByTopic);
 router.post('/generate-custom', generateCustomQuiz);

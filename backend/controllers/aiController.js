@@ -6,7 +6,7 @@ const { generateAiExplanation, chatWithAiTutor } = require('../services/aiServic
  */
 const getQuestionExplanation = async (req, res) => {
   try {
-    const { questionText, options, correctAnswerLetter, explanation } = req.body;
+    const { questionText, options, correctAnswerLetter, explanation, forceRefresh } = req.body;
 
     if (!questionText) {
       return res.status(400).json({ success: false, message: 'questionText is required.' });
@@ -16,7 +16,8 @@ const getQuestionExplanation = async (req, res) => {
       questionText,
       options,
       correctAnswerLetter,
-      explanation
+      explanation,
+      forceRefresh: Boolean(forceRefresh),
     });
 
     return res.status(200).json({
