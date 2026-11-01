@@ -21,6 +21,14 @@
 
 ---
 
+## ?? Application Screenshot & Interface Preview
+
+<div align="center">
+  <img src="./assets/screenshot.png" alt="Application Interface Preview" width="850" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" />
+</div>
+
+---
+
 ## 🌐 Suite 5 Ecosystem & Cross-Repository Links
 
 **DCP-QUIZZY** is the mobile flagship of the **Suite 5 (Medical & AI Quiz Ecosystem)**. It coordinates seamlessly with companion cloud platforms and AI authoring suites across the ecosystem:
