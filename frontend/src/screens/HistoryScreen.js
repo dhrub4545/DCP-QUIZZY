@@ -385,7 +385,7 @@ function HistoryScreen({ navigation, route, onTabPress, isActiveTab, onReady, hi
             <View style={[styles.aiExpHeader, isGlass && { borderBottomColor: 'rgba(168, 85, 247, 0.2)' }]}>
               <View style={styles.aiBadge}>
                 <Sparkles size={11} color="#ffffff" />
-                <Text style={styles.aiBadgeText}>GEMINI 3.6 FLASH AI</Text>
+                <Text style={styles.aiBadgeText}>GEMINI 3.8 FLASH AI</Text>
               </View>
               <Text style={[styles.aiExpTitle, isGlass && { color: '#7c3aed' }]}>In-Depth Explanation</Text>
             </View>

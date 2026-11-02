@@ -13,7 +13,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-v20+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Express](https://img.shields.io/badge/Express-4.19.2-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose_8.3-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://mongodb.com)
-[![Gemini AI](https://img.shields.io/badge/Google_Gemini-3.7_%2F_3.6_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
+[![Gemini AI](https://img.shields.io/badge/Google_Gemini-3.8_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
 [![Deployment](https://img.shields.io/badge/Vercel-Production_Live-black?style=for-the-badge&logo=vercel&logoColor=white)](https://dcp-quizzy-62ya-murex.vercel.app/api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
@@ -50,7 +50,7 @@ The **Nepal Medical Council Licensing Examination (NMCLE)** is the high-stakes q
 - **Verified High-Yield Clinical Corpora**: Dedicated digital banks spanning **Internal Medicine**, **General Surgery**, **Pediatrics**, and **Gynecology & Obstetrics (Gynae & Obs)**, comprising thousands of past council and curriculum questions.
 - **Compiler-Grade PDF Ingestion Pipeline**: An OCR and layout-learning parser (`algorithm.txt`) transforming complex paper MCQs, continuation tables, and clinical radiographs into structured JSON documents.
 - **Adaptive Dual Modes**: Instant pedagogical reinforcement in **Study Mode** with markdown explanations alongside strict **Exam Simulation Mode** featuring timing constraints, review flags, and negative-marking audits.
-- **Resilient AI Clinical Tutoring**: Integration with Google Gemini (`gemini-3.7-flash` and `gemini-3.6-flash`) with dynamic multi-key rotation (up to 20 keys) to provide conversational bedside teaching, pathophysiological breakdowns, and differential diagnoses on demand.
+- **Resilient AI Clinical Tutoring**: Integration with Google Gemini 3.8 Flash (`gemini-3.8-flash`) with dynamic multi-key rotation (up to 20 keys) to provide conversational bedside teaching, pathophysiological breakdowns, and differential diagnoses on demand.
 
 <div align="center">
   <img src="./logo2.png" alt="DCP Quizzy Secondary Badge" width="120" />
@@ -74,7 +74,7 @@ The **Nepal Medical Council Licensing Examination (NMCLE)** is the high-stakes q
   - **Test Mode**: Timed exam emulation matching NMCLE timing protocols, flag-for-review navigation drawer, and performance analytics.
 - 🤖 **Zero-Downtime Multi-Key Gemini Rotation**:
   - Load-balanced round-robin key pool (`GEMINI_API_KEY_1` through `GEMINI_API_KEY_20`).
-  - Automatic model fallback from `gemini-3.7-flash` to `gemini-3.6-flash` upon transient quota exhaustion.
+  - Dynamic key rotation and resilient failover powered by Google Gemini 3.8 Flash.
 - 🔒 **Enterprise-Grade Security & Performance**:
   - Multi-tier IP rate limiting (Auth: 10 req/15 min; AI: 20 req/min; General: 300 req/15 min).
   - Helmet HTTP security headers, Brotli/Gzip payload compression, and JWT authentication.
@@ -117,7 +117,7 @@ flowchart TD
 
     subgraph ExternalServices["Storage & AI Cloud Services"]
         MongoDB[("MongoDB Atlas Database\n(Quizzes, Users, History)")]
-        GeminiFlash["Google Gemini AI\n(gemini-3.7-flash -> gemini-3.6-flash)"]
+        GeminiFlash["Google Gemini 3.8 Flash\n(gemini-3.8-flash)"]
         Cloudinary["Cloudinary Cloud Media CDN\n(Clinical Images, EKGs, Micrographs)"]
     end
 
@@ -170,10 +170,10 @@ sequenceDiagram
         Student->>Client: Answers Question & Requests AI Deep Clinical Dive
         Client->>API: POST /api/ai/explain (QuestionText, SelectedOption, Options)
         API->>AI: callGeminiWithFallback(Prompt, MedicalSystemInstruction)
-        AI->>Gemini: Try gemini-3.7-flash (Active Key)
+        AI->>Gemini: Execute prompt on gemini-3.8-flash (Active Key)
         alt Key Exceeded or Rate Limit Encountered
             Gemini-->>AI: 429 Quota Exceeded
-            AI->>Gemini: Immediate Fallback: gemini-3.6-flash (Rotate Key)
+            AI->>Gemini: Failover to next key on gemini-3.8-flash
         end
         Gemini-->>AI: Generated Pathophysiology & Differential Rationale
         AI-->>API: Structured Medical Explanation
@@ -205,7 +205,7 @@ sequenceDiagram
 | **HTTP Client** | Axios | `^1.6.8` | Interceptor-managed network requests with automatic bearer injection |
 | **Backend Framework** | Node.js / Express.js | `4.19.2` | High-throughput REST API gateway with robust routing and error filters |
 | **Database & ODM** | MongoDB / Mongoose | `^8.3.1` | Document persistence, compound indexing, and pre-save validation hooks |
-| **Generative AI** | `@google/genai` & Generative SDK | `^2.13.0` | Gemini 3.7 & 3.6 Flash reasoning for explanations and interactive chat |
+| **Generative AI** | `@google/genai` & Generative SDK | `^2.13.0` | Google Gemini 3.8 Flash reasoning for explanations and interactive chat |
 | **OCR & Parsing** | MuPDF / pdf-lib / Tesseract.js | `^1.28.0` / `^7.0.0` | Algorithmic conversion of scanned medical papers into structured MCQs |
 | **Media Hosting** | Cloudinary SDK | `^1.41.3` | Cloud-hosted storage and CDN distribution for medical diagrams |
 | **Security & Auditing**| Helmet, Compression, Rate-Limit| `8.3` / `8.6` | HTTP header protection, Brotli compression, IP throttling, bcryptjs |
@@ -248,7 +248,7 @@ DCP-QUIZZY/
 │   │   ├── historyRoutes.js        # /api/history routes
 │   │   └── quizRoutes.js           # /api/quizzes routes (study, custom, topic)
 │   ├── services/
-│   │   └── aiService.js            # Multi-key rotation pool & Gemini 3.7/3.6 fallback
+│   │   └── aiService.js            # Multi-key rotation pool & Gemini 3.8 Flash execution
 │   ├── utils/
 │   │   └── jwt.js                  # Token generation, signing, and verification
 │   ├── .env.example                # Sanitized template for environment variables
@@ -486,7 +486,7 @@ pm2 save
 ## 🛡️ Security, Performance & Best Practices
 
 - **Zero Hardcoded Secrets**: All private credentials, database URIs, and API tokens are dynamically resolved from environment variables. `.env` patterns are strictly ignored by `.gitignore`.
-- **Defensive Multi-Key AI Architecture**: Prevents single-point rate limiting failures by automatically rotating across up to 20 Gemini API keys and falling back from `gemini-3.7-flash` to `gemini-3.6-flash`.
+- **Defensive Multi-Key AI Architecture**: Prevents single-point rate limiting failures by automatically rotating across up to 20 Gemini API keys and leveraging Google Gemini 3.8 Flash.
 - **Layered Rate Limiting**: Dedicated rate-limit windows protect CPU-intensive AI generation and prevent brute-force authentication attacks on `/api/auth/login`.
 - **Database Indexing**: Compound MongoDB indexes on `{ isCustom: 1, createdAt: -1 }` and `{ userId: 1, createdAt: -1 }` ensure instant retrieval across large collections.
 - **Client Cache Isolation**: React Native `appStateCache.js` caches active quiz sessions in memory, eliminating redundant network hops during rapid question navigation.

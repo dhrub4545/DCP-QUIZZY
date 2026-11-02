@@ -336,7 +336,7 @@ const PdfQuestionCard = memo(({
               <View style={styles.pdfAiExpHeader}>
                 <View style={styles.pdfAiBadge}>
                   <Sparkles size={11} color="#ffffff" />
-                  <Text style={styles.pdfAiBadgeText}>GEMINI 3.6 FLASH AI</Text>
+                  <Text style={styles.pdfAiBadgeText}>GEMINI 3.8 FLASH AI</Text>
                 </View>
                 <Text style={styles.pdfAiExpTitle}>In-Depth Explanation</Text>
               </View>

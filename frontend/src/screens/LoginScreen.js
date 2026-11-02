@@ -248,7 +248,7 @@ export default function LoginScreen({ navigation }) {
                 <Sparkles size={13} color="#2563eb" />
               </View>
               <Text style={styles.footerText}>
-                Powered by Gemini 3.6 Flash AI Engine
+                Powered by Gemini 3.8 Flash AI Engine
               </Text>
             </View>
           </View>

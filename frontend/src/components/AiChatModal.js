@@ -33,7 +33,7 @@ export default function AiChatModal({ visible, questionContext, onClose }) {
         {
           id: 'welcome_1',
           sender: 'ai',
-          text: `Hello! 👋 I'm your **Gemini 3.6 Flash AI Tutor**. I've loaded this question into my memory:\n\n**Question**: "${questionContext.questionText?.slice(0, 100)}..."\n\nHow can I help you understand this concept better? You can attach photos/diagrams using the 📷 icon, choose a quick action chip below, or type your question!`,
+          text: `Hello! 👋 I'm your **Gemini 3.8 Flash AI Tutor**. I've loaded this question into my memory:\n\n**Question**: "${questionContext.questionText?.slice(0, 100)}..."\n\nHow can I help you understand this concept better? You can attach photos/diagrams using the 📷 icon, choose a quick action chip below, or type your question!`,
         },
       ]);
       setInputText('');
@@ -168,7 +168,7 @@ export default function AiChatModal({ visible, questionContext, onClose }) {
                   <Text style={styles.headerTitle}>AI Tutor Chat</Text>
                   <View style={styles.modelBadge}>
                     <Sparkles size={9} color="#a855f7" />
-                    <Text style={styles.modelBadgeText}>Gemini 3.6 Flash</Text>
+                    <Text style={styles.modelBadgeText}>Gemini 3.8 Flash</Text>
                   </View>
                 </View>
                 <Text style={styles.headerSub} numberOfLines={1}>
@@ -226,7 +226,7 @@ export default function AiChatModal({ visible, questionContext, onClose }) {
                 </View>
                 <View style={[styles.bubble, styles.aiBubble, styles.loadingBubble]}>
                   <ActivityIndicator size="small" color="#818cf8" />
-                  <Text style={styles.typingText}>Gemini 3.6 Flash is analyzing...</Text>
+                  <Text style={styles.typingText}>Gemini 3.8 Flash is analyzing...</Text>
                 </View>
               </View>
             )}

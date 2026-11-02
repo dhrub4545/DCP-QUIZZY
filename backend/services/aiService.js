@@ -29,10 +29,10 @@ function getNextApiKey() {
 
 /**
  * Fallback Strategy:
- * 1. ONLY uses 'gemini-3.7-flash' and 'gemini-3.6-flash'.
+ * 1. ONLY uses 'gemini-3.8-flash' and 'gemini-3.8-flash'.
  * 2. Starts with a randomly selected key for distributed traffic.
- * 3. Attempts 'gemini-3.7-flash' on the active key using natural API execution.
- * 4. If an error occurs, immediately tries 'gemini-3.6-flash' on the SAME key.
+ * 3. Attempts 'gemini-3.8-flash' on the active key using natural API execution.
+ * 4. If an error occurs, immediately tries 'gemini-3.8-flash' on the SAME key.
  * 5. If both fail on that key, advances to the next key in sequence and repeats (3.7 -> 3.6).
  * 6. The backend maintains total control over error responses; the client waits until completion.
  */
@@ -56,11 +56,11 @@ async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
 
     const ai = new GoogleGenAI({ apiKey });
 
-    // Step 1: Try gemini-3.7-flash with current key
+    // Step 1: Try gemini-3.8-flash with current key
     try {
-      console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> Trying gemini-3.7-flash...`);
+      console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> Trying gemini-3.8-flash...`);
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-3.8-flash',
         contents: contentsPayload,
         config: {
           systemInstruction: systemInstruction || 'You are an expert AI medical & academic tutor.',
@@ -68,17 +68,17 @@ async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
       });
 
       if (response && response.text) {
-        console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.7-flash SUCCESS!`);
-        return { text: response.text, modelUsed: 'gemini-3.7-flash' };
+        console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.8-flash SUCCESS!`);
+        return { text: response.text, modelUsed: 'gemini-3.8-flash' };
       }
     } catch (err37) {
-      console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.7-flash: ${err37.message || err37}. Trying gemini-3.6-flash on SAME key...`);
+      console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.8-flash: ${err37.message || err37}. Trying gemini-3.8-flash on SAME key...`);
       lastError = err37;
 
-      // Step 2: Try gemini-3.6-flash with the SAME key
+      // Step 2: Try gemini-3.8-flash with the SAME key
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-3.8-flash',
           contents: contentsPayload,
           config: {
             systemInstruction: systemInstruction || 'You are an expert AI medical & academic tutor.',
@@ -86,18 +86,18 @@ async function callGeminiWithFallback(contentsInput, systemInstruction = '') {
         });
 
         if (response && response.text) {
-          console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.6-flash SUCCESS!`);
-          return { text: response.text, modelUsed: 'gemini-3.6-flash' };
+          console.log(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.8-flash SUCCESS!`);
+          return { text: response.text, modelUsed: 'gemini-3.8-flash' };
         }
       } catch (err36) {
-        console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.6-flash ALSO failed: ${err36.message || err36}. Trying next key...`);
+        console.warn(`[Gemini Engine] Key #${currentIdx + 1} (${keyMasked}) -> gemini-3.8-flash ALSO failed: ${err36.message || err36}. Trying next key...`);
         lastError = err36;
       }
     }
   }
 
   // All keys exhausted
-  console.error(`[Gemini Engine] All ${keys.length} keys failed for both gemini-3.7-flash and gemini-3.6-flash:`, lastError?.message);
+  console.error(`[Gemini Engine] All ${keys.length} keys failed for both gemini-3.8-flash and gemini-3.8-flash:`, lastError?.message);
   throw new Error('AI service is temporarily busy. Please try again in a few moments.');
 }
 

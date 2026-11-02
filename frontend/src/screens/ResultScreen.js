@@ -296,7 +296,7 @@ export default function ResultScreen({ route, navigation }) {
                         <View style={styles.aiExpHeader}>
                           <View style={styles.aiBadge}>
                             <Sparkles size={11} color="#ffffff" />
-                            <Text style={styles.aiBadgeText}>GEMINI 3.6 FLASH AI</Text>
+                            <Text style={styles.aiBadgeText}>GEMINI 3.8 FLASH AI</Text>
                           </View>
                           <Text style={styles.aiExpTitle}>In-Depth Explanation</Text>
                         </View>
